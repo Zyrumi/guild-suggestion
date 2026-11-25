@@ -109,6 +109,9 @@ local function List(parent)
         self:Layout()
     end)
     function list:Layout()
+        if self.BeforeLayout then
+            self.BeforeLayout()
+        end
         local y, height = 0, self:GetHeight()
         for _, row in ipairs(self.rows) do
             row:Hide()
@@ -339,6 +342,61 @@ local function ConfirmDecline(it)
     StaticPopup_Show("GUILDSUGGESTION_DECLINE", text, nil, it.id)
 end
 
+-- Invite: Forever only lets its own UI send guild invites, so an addon can't
+-- call the invite itself. Instead the Invite button is a secure button that
+-- runs "/ginvite First Surname" as a macro when you click it, exactly as if
+-- you had typed it. Secure buttons can't be moved, shown or hidden during a
+-- fight, so they sit on UIParent (outside the guild window) and are hidden
+-- and set loose as a fight starts; until it ends, the row's plain Invite
+-- button stands in and says to wait.
+local secureButtons = {}
+local fighting = false -- from the moment a fight starts until it ends
+
+local function HideSecure()
+    if InCombatLockdown() then
+        return
+    end
+    for _, b in ipairs(secureButtons) do
+        b:Hide()
+        b:ClearAllPoints()
+        b.id = nil
+    end
+end
+
+local function SecureFor(row)
+    if fighting or InCombatLockdown() then
+        return nil
+    end
+    local have = rawget(row, "secure")
+    if have then
+        return have
+    end
+    local ok, b = pcall(CreateFrame, "Button", "GuildSuggestionInvite" .. (#secureButtons + 1), UIParent,
+        "SecureActionButtonTemplate, UIPanelButtonTemplate")
+    if not ok or not b then
+        return nil
+    end
+    b:SetSize(76, 22)
+    b:SetText("Invite")
+    -- Both halves of a click: the game acts on the press or the release
+    -- depending on the "cast on key down" setting.
+    b:RegisterForClicks("AnyUp", "AnyDown")
+    b:SetAttribute("type", "macro")
+    b:HookScript("PostClick", function(self)
+        if self.id then
+            ns.WatchInvite(self.id)
+        end
+    end)
+    b:SetScript("OnEnter", function(self)
+        ShowTip(self, "Invite", "Sends " .. ns.Show(self.target) .. " a guild invite, like typing /ginvite. They need to be online.")
+    end)
+    b:SetScript("OnLeave", HideTip)
+    b:Hide()
+    secureButtons[#secureButtons + 1] = b
+    row.secure = b
+    return b
+end
+
 local function DecideRow(list)
     local row = CreateFrame("Frame", nil, list)
     row.name = Text(row, "GameFontHighlight")
@@ -352,7 +410,10 @@ local function DecideRow(list)
     row.reason:SetPoint("RIGHT", -4, 0)
     row.reason:SetWordWrap(true)
     row.reason:SetMaxLines(2)
-    row.invite = Button(row, "Invite", 76, function(self) ns.InvitePlayer(self:GetParent().id) end)
+    -- Stand-in while a fight is on (see SecureFor).
+    row.invite = Button(row, "Invite", 76, function()
+        ns.Print("guild invites can be sent again when the fight is over.")
+    end)
     row.invite:SetPoint("TOPRIGHT", -84, -1)
     row.decline = Button(row, "Decline", 76, function(self)
         local g = ns.Guild()
@@ -411,9 +472,21 @@ local function FillDecide(row, e)
         local c = it.status == "invited" and GOOD or GOLD
         row.reason:SetTextColor(c[1], c[2], c[3])
     end
-    row.invite:SetShown(waiting)
     row.decline:SetShown(waiting)
     row.remove:SetShown(not waiting)
+    local secure = waiting and SecureFor(row)
+    if secure then
+        secure.id, secure.target = it.id, it.target
+        secure:SetAttribute("macrotext", "/ginvite " .. it.target)
+        secure:ClearAllPoints()
+        secure:SetPoint("TOPRIGHT", row, "TOPRIGHT", -84, -1)
+        secure:SetFrameStrata(row:GetFrameStrata() or "MEDIUM")
+        secure:SetFrameLevel((row:GetFrameLevel() or 0) + 10)
+        secure:Show()
+        row.invite:Hide()
+    else
+        row.invite:SetShown(waiting)
+    end
 end
 
 local function BuildDecidePage(parent)
@@ -428,6 +501,7 @@ local function BuildDecidePage(parent)
     p.list:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -4, 18)
     p.list.MakeRow = DecideRow
     p.list.FillRow = FillDecide
+    p.list.BeforeLayout = HideSecure
 
     function p:Refresh()
         local g = ns.Guild()
@@ -436,7 +510,7 @@ local function BuildDecidePage(parent)
             for _, it in pairs(g.items) do
                 if it.status == "new" then
                     waiting[#waiting + 1] = it
-                elseif it.status == "invited" or it.status == "declined" then
+                elseif (it.status == "invited" or it.status == "declined") and not it.removedAt then
                     decided[#decided + 1] = it
                 end
             end
@@ -469,6 +543,103 @@ local function BuildDecidePage(parent)
 end
 
 -------------------------------------------------------------------------------
+-- Page 3: Log (only for members who may invite)
+-- Every step of every suggestion, newest first: who suggested whom, who
+-- invited or declined, who took it off the list, and when.
+-------------------------------------------------------------------------------
+
+local function When(t)
+    local fmt = date or (os and os.date)
+    return t and fmt and fmt("%Y-%m-%d %H:%M", t) or ""
+end
+
+-- One line per step, built from what each suggestion keeps.
+function ns.LogEntries()
+    local g = ns.GuildName() and ns.Guild()
+    local list = {}
+    if not g then
+        return list
+    end
+    for _, it in pairs(g.items) do
+        local who = ns.Show(it.target)
+        list[#list + 1] = { at = it.at or 0, item = it, text = ns.Show(it.by) .. " suggested " .. who }
+        if it.decidedAt and it.decidedBy then
+            local did = (it.status == "invited" and "invited") or (it.status == "declined" and "declined") or "decided on"
+            list[#list + 1] = { at = it.decidedAt, item = it, text = ns.Show(it.decidedBy) .. " " .. did .. " " .. who }
+        end
+        if it.removedAt and it.removedBy then
+            list[#list + 1] = { at = it.removedAt, item = it, text = ns.Show(it.removedBy) .. " removed " .. who .. " from the list" }
+        end
+    end
+    table.sort(list, function(a, b)
+        if a.at ~= b.at then
+            return a.at > b.at
+        end
+        return a.text < b.text
+    end)
+    return list
+end
+
+local function LogRow(list)
+    local row = CreateFrame("Frame", nil, list)
+    row.when = Text(row, "GameFontDisableSmall", "", DIM)
+    row.when:SetPoint("LEFT", 2, 0)
+    row.when:SetWidth(104)
+    row.text = Text(row, "GameFontHighlightSmall", "", WHITE)
+    row.text:SetPoint("LEFT", row.when, "RIGHT", 6, 0)
+    row.text:SetPoint("RIGHT", -2, 0)
+    row.text:SetWordWrap(false)
+    row:EnableMouse(true)
+    row:SetScript("OnEnter", function(self)
+        local it = self.item
+        if it then
+            ShowTip(self, ns.Show(it.target), "Suggested by " .. ns.Show(it.by) .. ", " .. When(it.at),
+                it.reason ~= "" and ("Reason: " .. it.reason) or "No reason given")
+        end
+    end)
+    row:SetScript("OnLeave", HideTip)
+    return row
+end
+
+local function FillLog(row, e)
+    row.item = e.item
+    row.when:SetText(When(e.at))
+    row.text:SetText(e.text)
+end
+
+local function BuildLogPage(parent)
+    local p = CreateFrame("Frame", nil, parent)
+    p:SetAllPoints()
+    p.note = Text(p, "GameFontDisableSmall", "", DIM)
+    p.note:SetPoint("TOPLEFT", 4, -4)
+    p.note:SetPoint("RIGHT", p, "RIGHT", -4, 0)
+    p.list = List(p)
+    p.list:SetPoint("TOPLEFT", p.note, "BOTTOMLEFT", 0, -8)
+    p.list:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -4, 18)
+    p.list.MakeRow = LogRow
+    p.list.FillRow = FillLog
+
+    function p:Refresh()
+        local entries = {}
+        if ns.IMayInvite() then
+            for _, e in ipairs(ns.LogEntries()) do
+                e.height = 20
+                entries[#entries + 1] = e
+            end
+        end
+        if not ns.IMayInvite() then
+            p.note:SetText("Only members who can invite see the log.")
+        elseif #entries == 0 then
+            p.note:SetText("Nothing logged yet.")
+        else
+            p.note:SetText("Every suggestion and decision, newest first. Hover a line for the reason.")
+        end
+        p.list:SetEntries(entries)
+    end
+    return p
+end
+
+-------------------------------------------------------------------------------
 -- Tab in the guild window
 --
 -- A side tab under the game's guild tabs (Roster, Info, ...) opens our panel
@@ -488,10 +659,13 @@ local panel, tab, switch
 local hookedTabs = {}
 
 local function ShowPage(i)
-    if i == 2 and not ns.IMayInvite() then
+    if i ~= 1 and not ns.IMayInvite() then
         i = 1
     end
     currentPage = i
+    if i ~= 2 then
+        HideSecure()
+    end
     for n, page in ipairs(pages) do
         page:SetShown(n == i)
     end
@@ -519,8 +693,9 @@ local function UpdateSwitch()
     if switch[2].isTab == true then
         pcall(PanelTemplates_TabResize, switch[2], 0)
     end
-    switch[1]:SetShown(mayInvite)
-    switch[2]:SetShown(mayInvite)
+    for _, t in ipairs(switch) do
+        t:SetShown(mayInvite)
+    end
     switch.line:SetShown(mayInvite)
     if not mayInvite and currentPage == 2 then
         ShowPage(1)
@@ -634,6 +809,7 @@ local function SetBlizzardTabsChecked(cf, checked)
 end
 
 local function HidePanel()
+    HideSecure()
     if panel and panel:IsShown() then
         panel:Hide()
     end
@@ -704,15 +880,18 @@ local function BuildPanel(cf)
         end
         return t
     end
-    switch = { Tab("Suggest", 1), Tab("To decide", 2), line = line }
-    switch[2]:SetPoint("BOTTOMRIGHT", line, "TOPRIGHT", -8, 0)
-    switch[1]:SetPoint("BOTTOMRIGHT", switch[2], "BOTTOMLEFT", switch[1].isTab == true and 0 or -4, 0)
+    switch = { Tab("Suggest", 1), Tab("To decide", 2), Tab("Log", 3), line = line }
+    switch[3]:SetPoint("BOTTOMRIGHT", line, "TOPRIGHT", -8, 0)
+    for i = 2, 1, -1 do
+        switch[i]:SetPoint("BOTTOMRIGHT", switch[i + 1], "BOTTOMLEFT", switch[i].isTab == true and 0 or -4, 0)
+    end
 
     local content = CreateFrame("Frame", nil, panel)
     content:SetPoint("TOPLEFT", 12, -48)
     content:SetPoint("BOTTOMRIGHT", -12, 8)
     pages[1] = BuildSuggestPage(content)
     pages[2] = BuildDecidePage(content)
+    pages[3] = BuildLogPage(content)
     panel:SetScript("OnShow", function() ShowPage(currentPage) end)
 end
 
@@ -865,6 +1044,15 @@ ns.On("IS_READY", function()
     end
 end)
 ns.On("IS_ROSTER", function() ns.RefreshBadge() end)
+ns.On("PLAYER_REGEN_DISABLED", function()
+    fighting = true
+    HideSecure()
+    ns.RefreshUI()
+end)
+ns.On("PLAYER_REGEN_ENABLED", function()
+    fighting = false
+    ns.RefreshUI()
+end)
 
 function ns.RefreshUI()
     ns.RefreshBadge()

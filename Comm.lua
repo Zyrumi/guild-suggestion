@@ -19,7 +19,7 @@
 --   ST  status: id^status                                 inviter -> member
 --   DL  my list: id:rev,id:rev,...                        inviter -> inviter
 --   DQ  please send: id,id,...                            inviter -> inviter
---   DI  one suggestion: id^rev^target^by^at^status^decidedBy^decidedAt^reason
+--   DI  one suggestion: id^rev^target^by^at^status^decidedBy^decidedAt^reason^removedBy^removedAt
 --
 -- Long messages are split in parts; sending is paced and pauses in combat.
 
@@ -176,7 +176,7 @@ end
 
 local function ItemPayload(it)
     return table.concat({ it.id, it.rev or 1, it.target, it.by, it.at or 0, it.status or "new",
-        it.decidedBy or "", it.decidedAt or 0, it.reason or "" }, "^")
+        it.decidedBy or "", it.decidedAt or 0, it.reason or "", it.removedBy or "", it.removedAt or 0 }, "^")
 end
 
 local function SendSuggestion(to, m)
@@ -276,12 +276,12 @@ function ns.Suggest(rawTarget, rawReason)
         return false, ns.Show(target) .. " is already in the guild."
     end
     local reason = ns.Clean(rawReason, ns.MAX_REASON)
-    local m = { id = ns.NewId(), target = target, reason = reason, by = ns.me, at = time(), status = "new" }
+    local m = { id = ns.NewId(), target = target, reason = reason, by = ns.MyKey(), at = time(), status = "new" }
     g.mine[m.id] = m
     if IMayInvite() then
         -- You may invite yourself: it goes straight on your list and to the others.
         m.delivered = true
-        local it = { id = m.id, rev = 1, target = target, reason = reason, by = ns.me, at = m.at, status = "new" }
+        local it = { id = m.id, rev = 1, target = target, reason = reason, by = ns.MyKey(), at = m.at, status = "new" }
         g.items[it.id] = it
         PushItem(it)
         Refresh()
@@ -298,20 +298,27 @@ function ns.Suggest(rawTarget, rawReason)
     return true, "Saved. It goes out when a member who can invite is online at the same time as you."
 end
 
--- An inviter's choice: "invited", "declined" or "removed".
+-- An inviter's choice: "invited", "declined" or "removed". Removing only
+-- takes a decided suggestion off the Decided list: its status (invited or
+-- declined) and who decided stay on record for the log, next to who removed it.
 function ns.Decide(id, status)
     local g = ns.Guild()
     local it = g and g.items[id]
     if not it or not STATUSES[status] or not IMayInvite() then
         return
     end
-    it.status = status
     it.rev = (it.rev or 1) + 1
-    it.decidedBy = ns.me
-    it.decidedAt = time()
-    it.told = nil
-    if ns.IsMe(it.by) and g.mine[id] then
-        g.mine[id].status = status ~= "removed" and status or g.mine[id].status
+    if status == "removed" then
+        it.removedBy = ns.MyKey()
+        it.removedAt = time()
+    else
+        it.status = status
+        it.decidedBy = ns.MyKey()
+        it.decidedAt = time()
+        it.told = nil
+    end
+    if ns.IsMe(it.by) and g.mine[id] and status ~= "removed" then
+        g.mine[id].status = status
     end
     PushItem(it)
     TellSuggester(it)
@@ -341,15 +348,17 @@ local function FormatPattern(fmt)
     return "^" .. p:gsub("%%%%s", "(.+)") .. "$"
 end
 
-function ns.InvitePlayer(id)
+-- Called right after the Invite button ran "/ginvite Name" (the game only
+-- lets its own UI send guild invites, so the button runs that command; see
+-- UI.lua). Watches the game's answer in chat to know whether it went out.
+function ns.WatchInvite(id)
     local g = ns.Guild()
     local it = g and g.items[id]
-    if not it or not C_GuildInfo or not C_GuildInfo.Invite then
+    if not it then
         return
     end
-    local ok = pcall(C_GuildInfo.Invite, it.target)
-    if not ok then
-        ns.Print("the game did not let the addon send the invite. Type /ginvite " .. it.target)
+    -- One click can reach us twice (press and release).
+    if pendingInvite and pendingInvite.id == id and GetTime() - pendingInvite.at < 1 then
         return
     end
     pendingInvite = { id = id, first = ns.FirstName(it.target), at = GetTime(), name = it.target }
@@ -358,7 +367,8 @@ function ns.InvitePlayer(id)
             if pendingInvite.unreadable then
                 ns.Decide(id, "invited") -- the game's answer can't be read; trust the click
             else
-                ns.Print("no answer from the game about inviting " .. ns.Show(it.target) .. ". They may be offline.")
+                ns.Print("the game didn't confirm an invite to " .. ns.Show(it.target)
+                    .. ", so it stays on the To decide list.")
             end
             pendingInvite = nil
         end
@@ -522,6 +532,8 @@ function Whisper.DI(from, payload)
         decidedBy = (f[7] ~= "" and (ns.Member(f[7]) or ns.FullName(f[7]))) or nil,
         decidedAt = tonumber(f[8]) ~= 0 and tonumber(f[8]) or nil,
         reason = ns.Clean(f[9], ns.MAX_REASON),
+        removedBy = ((f[10] or "") ~= "" and (ns.Member(f[10]) or ns.FullName(f[10]))) or nil,
+        removedAt = (tonumber(f[11]) or 0) ~= 0 and tonumber(f[11]) or nil,
         told = old and old.told or nil,
     }
     g.items[id] = it

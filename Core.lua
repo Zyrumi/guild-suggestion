@@ -239,7 +239,8 @@ end
 
 -- items: suggestions you can decide on (only kept if you may invite)
 --   [id] = { id, target, reason, by, at, status, decidedBy, decidedAt, rev }
---   status: "new", "invited", "declined" or "removed"
+--   status: "new", "invited" or "declined" ("removed" in data from 0.2 and older)
+--   removedBy, removedAt: who took a decided one off the Decided list (kept for the log)
 -- mine: suggestions made by your characters
 --   [id] = { id, target, reason, by, at, delivered, status }
 function ns.Guild()
@@ -314,6 +315,11 @@ function ns.Member(raw)
     return nil
 end
 
+-- Your name as the roster writes it (so the log names you like others do).
+function ns.MyKey()
+    return ns.Member(ns.me) or ns.me
+end
+
 -- Whether a name (as the roster or a message gave it) is you.
 function ns.IsMe(name)
     return name ~= nil and (name == ns.me or ns.Member(ns.me) == name)
@@ -361,27 +367,9 @@ ns.On("GUILD_ROSTER_UPDATE", function()
     ns.Fire("IS_ROSTER")
 end)
 
--- Old decided and removed suggestions are dropped after a while.
-local KEEP_DECIDED = 60 * 86400
-local KEEP_REMOVED = 30 * 86400
-
-local function Purge()
-    local now = time()
-    for _, g in pairs(ns.db.guilds) do
-        if type(g) == "table" then
-            for id, it in pairs(g.items or {}) do
-                local t = it.decidedAt or it.at or 0
-                if (it.status == "removed" and now - t > KEEP_REMOVED)
-                    or ((it.status == "invited" or it.status == "declined") and now - t > KEEP_DECIDED) then
-                    g.items[id] = nil
-                end
-            end
-        end
-    end
-end
-
+-- Suggestions are never dropped: they are the guild's invite log (see the
+-- Log tab). Each is a few hundred bytes, so years of them stay small.
 ns.On("IS_READY", function()
-    Purge()
     if C_GuildInfo and C_GuildInfo.GuildRoster then
         pcall(C_GuildInfo.GuildRoster)
     end
