@@ -285,7 +285,7 @@ function ns.Suggest(rawTarget, rawReason)
         g.items[it.id] = it
         PushItem(it)
         Refresh()
-        return true, "Added to the list."
+        return true, "Added to the To decide list."
     end
     local to = OnlineInviters()
     for _, name in ipairs(to) do

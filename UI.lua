@@ -300,12 +300,12 @@ local function BuildSuggestPage(parent)
         if not g then
             p.who:SetText("You are not in a guild.")
         elseif ns.IMayInvite() then
-            p.who:SetText("You can invite, so your suggestions skip sending and go straight on the To decide list. Nobody is invited until someone clicks Invite there.")
+            p.who:SetText("Anyone you suggest shows up on the To decide list.")
         else
             local n = #ns.OnlineInviters()
-            p.who:SetText(n == 0 and "Nobody who can invite is online with this addon right now."
-                or (n == 1 and "1 member who can invite is online with this addon."
-                or (n .. " members who can invite are online with this addon.")))
+            local start = "Your suggestion shows up on the To decide list of the members who can invite. You see their answer below. "
+            p.who:SetText(start .. (n == 0 and "None of them is online right now, so it waits until one is online at the same time as you."
+                or (n == 1 and "1 of them is online now." or (n .. " of them are online now."))))
         end
     end
     return p
@@ -496,8 +496,13 @@ local function ShowPage(i)
         page:SetShown(n == i)
     end
     if switch then
-        switch[1]:SetEnabled(i ~= 1)
-        switch[2]:SetEnabled(i ~= 2)
+        for n, t in ipairs(switch) do
+            if t.isTab == true then
+                if n == i then PanelTemplates_SelectTab(t) else PanelTemplates_DeselectTab(t) end
+            else
+                t:SetEnabled(n ~= i)
+            end
+        end
     end
     if pages[i] and pages[i].Refresh then
         pages[i]:Refresh()
@@ -511,8 +516,12 @@ local function UpdateSwitch()
     local mayInvite = ns.IMayInvite()
     local waiting = ns.WaitingCount()
     switch[2]:SetText(waiting > 0 and ("To decide (" .. waiting .. ")") or "To decide")
+    if switch[2].isTab == true then
+        pcall(PanelTemplates_TabResize, switch[2], 0)
+    end
     switch[1]:SetShown(mayInvite)
     switch[2]:SetShown(mayInvite)
+    switch.line:SetShown(mayInvite)
     if not mayInvite and currentPage == 2 then
         ShowPage(1)
     end
@@ -667,16 +676,40 @@ local function BuildPanel(cf)
     bg:SetColorTexture(0.04, 0.04, 0.05, 1)
 
     local title = Text(panel, "GameFontNormalLarge", "Guild suggestions", GOLD)
-    title:SetPoint("TOPLEFT", 12, -10)
-    switch = {
-        Button(panel, "Suggest", 100, function() ShowPage(1) end),
-        Button(panel, "To decide", 120, function() ShowPage(2) end),
-    }
-    switch[2]:SetPoint("TOPRIGHT", -12, -8)
-    switch[1]:SetPoint("RIGHT", switch[2], "LEFT", -4, 0)
+    title:SetPoint("TOPLEFT", 12, -12)
+    -- Tabs standing on a line across the panel, like the Macros window.
+    local line = panel:CreateTexture(nil, "ARTWORK")
+    line:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 0.35)
+    line:SetHeight(1)
+    line:SetPoint("TOPLEFT", 8, -38)
+    line:SetPoint("TOPRIGHT", -8, -38)
+    local function Tab(label, i)
+        local hasApi = PanelTemplates_SelectTab and PanelTemplates_DeselectTab and PanelTemplates_TabResize
+        local ok, t = false, nil
+        if hasApi then
+            ok, t = pcall(CreateFrame, "Button", "GuildSuggestionPageTab" .. i, panel, "PanelTopTabButtonTemplate")
+        end
+        if ok and t then
+            t.isTab = true
+            t:SetText(label)
+            pcall(PanelTemplates_TabResize, t, 0)
+            t:SetScript("OnClick", function()
+                if PlaySound and SOUNDKIT and SOUNDKIT.IG_CHARACTER_INFO_TAB then
+                    pcall(PlaySound, SOUNDKIT.IG_CHARACTER_INFO_TAB)
+                end
+                ShowPage(i)
+            end)
+        else
+            t = Button(panel, label, 110, function() ShowPage(i) end)
+        end
+        return t
+    end
+    switch = { Tab("Suggest", 1), Tab("To decide", 2), line = line }
+    switch[2]:SetPoint("BOTTOMRIGHT", line, "TOPRIGHT", -8, 0)
+    switch[1]:SetPoint("BOTTOMRIGHT", switch[2], "BOTTOMLEFT", switch[1].isTab == true and 0 or -4, 0)
 
     local content = CreateFrame("Frame", nil, panel)
-    content:SetPoint("TOPLEFT", 12, -40)
+    content:SetPoint("TOPLEFT", 12, -48)
     content:SetPoint("BOTTOMRIGHT", -12, 8)
     pages[1] = BuildSuggestPage(content)
     pages[2] = BuildDecidePage(content)
@@ -770,7 +803,7 @@ local function PlaceTab(cf)
     end
     table.sort(before, function(a, b) return a.sideTabAddon < b.sideTabAddon end)
     if #before > 0 then
-        last, gap = before[#before], -6
+        last = before[#before]
     end
     tab:ClearAllPoints()
     if last then
