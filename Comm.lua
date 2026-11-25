@@ -55,7 +55,7 @@ end
 
 local function Refresh()
     if ns.RefreshUI then ns.RefreshUI() end
-    if ns.RefreshMinimapMark then ns.RefreshMinimapMark() end
+    if ns.RefreshBadge then ns.RefreshBadge() end
 end
 
 -------------------------------------------------------------------------------
@@ -232,9 +232,9 @@ local function NoteNew(it)
         newTimer = false
         if newCount == 1 and ns.lastNew then
             ns.Print("new invite suggestion: " .. ns.Show(ns.lastNew.target) .. " (from " .. ns.Show(ns.lastNew.by)
-                .. "). Type /gsuggest to see it.")
+                .. "). Open the guild window or type /gsuggest to see it.")
         elseif newCount > 1 then
-            ns.Print(newCount .. " new invite suggestions. Type /gsuggest to see them.")
+            ns.Print(newCount .. " new invite suggestions. Open the guild window or type /gsuggest to see them.")
         end
         newCount = 0
         ns.lastNew = nil

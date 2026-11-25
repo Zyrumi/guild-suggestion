@@ -1,4 +1,4 @@
--- GuildSuggestion: the window, minimap button and right-click menu entry.
+-- GuildSuggestion: the tab in the guild window and the right-click menu entry.
 --
 -- Page "Suggest": name + reason, and your own suggestions with their status.
 -- Page "To decide": only for members who may invite. Waiting suggestions
@@ -6,14 +6,13 @@
 
 local ADDON_NAME, ns = ...
 
-local W, H = 440, 520
 local GOLD = { 1, 0.82, 0 }
 local WHITE = { 1, 1, 1 }
 local DIM = { 0.65, 0.65, 0.65 }
 local GOOD = { 0.35, 0.9, 0.35 }
 local ICON = "Interface\\Icons\\INV_Letter_15"
 
-local window, pages, tabs = nil, {}, {}
+local pages = {}
 local currentPage = 1
 
 -------------------------------------------------------------------------------
@@ -218,10 +217,9 @@ local function BuildSuggestPage(parent)
     p.name:SetPoint("TOPLEFT", nameLabel, "BOTTOMLEFT", 6, -4)
     p.name:SetMaxLetters(60)
     local useTarget = Button(p, "Use target", 100, function()
-        local first, second = UnitName("target")
-        if UnitIsPlayer and UnitIsPlayer("target") and type(first) == "string" and not ns.IsSecret(first) then
-            local raw = (type(second) == "string" and not ns.IsSecret(second) and second ~= "") and (first .. " " .. second) or first
-            p.name:SetText(ns.FullName(raw) or raw)
+        local name = ns.TargetName()
+        if name then
+            p.name:SetText(name)
             p.name:UpdateHint()
         else
             p.msg:SetText("Target a player first.")
@@ -302,7 +300,7 @@ local function BuildSuggestPage(parent)
         if not g then
             p.who:SetText("You are not in a guild.")
         elseif ns.IMayInvite() then
-            p.who:SetText("You can invite, so your suggestions go straight on the To decide list.")
+            p.who:SetText("You can invite, so your suggestions skip sending and go straight on the To decide list. Nobody is invited until someone clicks Invite there.")
         else
             local n = #ns.OnlineInviters()
             p.who:SetText(n == 0 and "Nobody who can invite is online with this addon right now."
@@ -471,268 +469,430 @@ local function BuildDecidePage(parent)
 end
 
 -------------------------------------------------------------------------------
--- Window
+-- Tab in the guild window
+--
+-- A side tab under the game's guild tabs (Roster, Info, ...) opens our panel
+-- on top of the window's content. It never changes the window's display
+-- mode, so the game's own tabs keep working.
+--
+-- Other addons can add side tabs the same way (FriendsCraft's Professions
+-- tab does). Each such tab carries .sideTabAddon = its addon's name: tabs
+-- line up in name order under the game's tabs, and clicking any other tab
+-- closes our panel. Our panel opens one frame after the click, so another
+-- addon closing its own panel on that click can't undo what ours sets up.
 -------------------------------------------------------------------------------
 
+local SIDE_TAB_ID = "GuildSuggestion"
+local BLIZZ_TABS = { "ChatTab", "RosterTab", "GuildBenefitsTab", "GuildInfoTab", "GuildPreferredPlaySettingsTab" }
+local panel, tab, switch
+local hookedTabs = {}
+
 local function ShowPage(i)
+    if i == 2 and not ns.IMayInvite() then
+        i = 1
+    end
     currentPage = i
     for n, page in ipairs(pages) do
         page:SetShown(n == i)
     end
-    if PanelTemplates_SetTab and window.numTabs then
-        PanelTemplates_SetTab(window, i)
-    end
-    for n, t in ipairs(tabs) do
-        if t.plain then
-            t:SetEnabled(n ~= i)
-        end
+    if switch then
+        switch[1]:SetEnabled(i ~= 1)
+        switch[2]:SetEnabled(i ~= 2)
     end
     if pages[i] and pages[i].Refresh then
         pages[i]:Refresh()
     end
 end
 
-local function UpdateTabs()
+local function UpdateSwitch()
+    if not switch then
+        return
+    end
     local mayInvite = ns.IMayInvite()
     local waiting = ns.WaitingCount()
-    if tabs[2] then
-        tabs[2]:SetText(waiting > 0 and ("To decide (" .. waiting .. ")") or "To decide")
-        if PanelTemplates_TabResize then
-            pcall(PanelTemplates_TabResize, tabs[2], 0)
-        end
-        tabs[2]:SetShown(mayInvite)
-    end
+    switch[2]:SetText(waiting > 0 and ("To decide (" .. waiting .. ")") or "To decide")
+    switch[1]:SetShown(mayInvite)
+    switch[2]:SetShown(mayInvite)
     if not mayInvite and currentPage == 2 then
         ShowPage(1)
     end
 end
 
-local function SavePlace()
-    local point, _, relPoint, x, y = window:GetPoint(1)
-    ns.db.window = { point = point, relPoint = relPoint, x = x, y = y }
+-- The tab's badge and tooltip show how many wait for a decision.
+function ns.RefreshBadge()
+    if not tab then
+        return
+    end
+    local waiting = ns.WaitingCount()
+    tab.badge:SetText(waiting > 0 and tostring(waiting) or "")
+    tab.badge:SetShown(waiting > 0)
+    tab.tooltip = waiting > 0 and ("Guild suggestions (" .. waiting .. " waiting)") or "Guild suggestions"
 end
 
-local function BuildWindow()
-    local ok, f = pcall(CreateFrame, "Frame", "GuildSuggestionFrame", UIParent, "ButtonFrameTemplate")
-    local framed = ok and f
-    if not framed then
-        f = CreateFrame("Frame", "GuildSuggestionFrame", UIParent, "BackdropTemplate")
-        if f.SetBackdrop then
-            f:SetBackdrop({
-                bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-                edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-                tile = true, tileSize = 32, edgeSize = 32,
-                insets = { left = 11, right = 12, top = 12, bottom = 11 },
-            })
-        end
-        local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-        close:SetPoint("TOPRIGHT", -4, -4)
-        local title = Text(f, "GameFontNormal", "GuildSuggestion", GOLD)
-        title:SetPoint("TOP", 0, -16)
-    end
-    window = f
-    f:SetSize(W, H)
-    local place = ns.db.window or {}
-    if place.point then
-        f:SetPoint(place.point, UIParent, place.relPoint or place.point, tonumber(place.x) or 0, tonumber(place.y) or 0)
-    else
-        f:SetPoint("CENTER")
-    end
-    f:SetFrameStrata("HIGH")
-    f:SetToplevel(true)
-    f:EnableMouse(true)
-    f:SetMovable(true)
-    f:SetClampedToScreen(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        SavePlace()
-    end)
-    f:Hide()
-    tinsert(UISpecialFrames, "GuildSuggestionFrame")
+-- The guild chat's scroll bar is drawn on the HIGH layer, above the whole
+-- window. While our panel is open it moves down to the window's own layer.
+local chatBarStrata
+local function ChatBar()
+    local chat = CommunitiesFrame and CommunitiesFrame.Chat
+    return type(chat) == "table" and chat.ScrollBar or nil
+end
 
-    if framed then
-        if ButtonFrameTemplate_HideButtonBar then
-            pcall(ButtonFrameTemplate_HideButtonBar, f)
-        end
-        if f.SetTitle then
-            pcall(f.SetTitle, f, "GuildSuggestion")
-        end
-        if f.SetPortraitToAsset then
-            pcall(f.SetPortraitToAsset, f, ICON)
-        elseif type(f.portrait) == "table" and SetPortraitToTexture then
-            pcall(SetPortraitToTexture, f.portrait, ICON)
-        end
+local function LowerChatBar()
+    local bar = ChatBar()
+    if chatBarStrata or not bar or not bar.GetFrameStrata then
+        return
     end
+    local strata = bar:GetFrameStrata()
+    if type(strata) == "string" then
+        chatBarStrata = strata
+        bar:SetFrameStrata(panel:GetFrameStrata() or "MEDIUM")
+    end
+end
 
-    local content = CreateFrame("Frame", nil, f)
-    if framed and type(f.Inset) == "table" then
-        content:SetPoint("TOPLEFT", f.Inset, "TOPLEFT", 8, -8)
-        content:SetPoint("BOTTOMRIGHT", f.Inset, "BOTTOMRIGHT", -8, 4)
-    else
-        content:SetPoint("TOPLEFT", 20, -40)
-        content:SetPoint("BOTTOMRIGHT", -20, 20)
+local function RestoreChatBar()
+    local bar = ChatBar()
+    if chatBarStrata and bar then
+        bar:SetFrameStrata(chatBarStrata)
     end
+    chatBarStrata = nil
+end
+
+-- The roster page's buttons along the bottom edge (Invite Member, Guild
+-- Control, Guild Log) sit outside the panel; they're faded out and made
+-- unclickable while it's open, so the game stays in charge of showing them.
+local BOTTOM_BUTTONS = { "InviteButton", "CommunitiesControlFrame", "GuildLogButton" }
+local muted
+
+local function Mute(f)
+    if f.IsMouseEnabled and f.EnableMouse then
+        muted[f] = f:IsMouseEnabled()
+        f:EnableMouse(false)
+    else
+        muted[f] = false
+    end
+    if f.GetChildren then
+        for _, child in ipairs({ f:GetChildren() }) do
+            Mute(child)
+        end
+    end
+end
+
+local function MuteBottomButtons()
+    local cf = CommunitiesFrame
+    if muted or not cf then
+        return
+    end
+    muted = {}
+    for _, key in ipairs(BOTTOM_BUTTONS) do
+        local f = rawget(cf, key)
+        if type(f) == "table" and f.SetAlpha then
+            f:SetAlpha(0)
+            Mute(f)
+        end
+    end
+    local detail = rawget(cf, "GuildMemberDetailFrame")
+    if type(detail) == "table" and detail.Hide then
+        detail:Hide()
+    end
+end
+
+local function RestoreBottomButtons()
+    local cf = CommunitiesFrame
+    if not muted or not cf then
+        return
+    end
+    for f, mouse in pairs(muted) do
+        if mouse then
+            f:EnableMouse(true)
+        end
+    end
+    for _, key in ipairs(BOTTOM_BUTTONS) do
+        local f = rawget(cf, key)
+        if type(f) == "table" and f.SetAlpha then
+            f:SetAlpha(1)
+        end
+    end
+    muted = nil
+end
+
+local function SetBlizzardTabsChecked(cf, checked)
+    for _, n in ipairs(BLIZZ_TABS) do
+        local t = cf[n]
+        if t and t.SetChecked then
+            t:SetChecked(checked)
+        end
+    end
+end
+
+local function HidePanel()
+    if panel and panel:IsShown() then
+        panel:Hide()
+    end
+    RestoreChatBar()
+    RestoreBottomButtons()
+    if tab then
+        tab:SetChecked(false)
+    end
+end
+
+local function ShowPanel()
+    if not panel or not tab or not tab:IsShown() then
+        return
+    end
+    panel:Show()
+    LowerChatBar()
+    MuteBottomButtons()
+    SetBlizzardTabsChecked(CommunitiesFrame, false)
+    for t in pairs(hookedTabs) do
+        if t.SetChecked then t:SetChecked(false) end
+    end
+    tab:SetChecked(true)
+    UpdateSwitch()
+    ShowPage(currentPage)
+    if C_GuildInfo and C_GuildInfo.GuildRoster then
+        pcall(C_GuildInfo.GuildRoster)
+    end
+end
+
+local function BuildPanel(cf)
+    panel = CreateFrame("Frame", nil, cf)
+    panel:Hide()
+    panel:SetPoint("TOPLEFT", cf.CommunitiesList or cf, cf.CommunitiesList and "TOPRIGHT" or "TOPLEFT", 24, 0)
+    panel:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", -8, 26)
+    -- Well above every page of the window (its chat input sits high).
+    panel:SetFrameLevel(math.min((cf:GetFrameLevel() or 0) + 3000, 9000))
+    panel:EnableMouse(true)
+    local bg = panel:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.04, 0.04, 0.05, 1)
+
+    local title = Text(panel, "GameFontNormalLarge", "Guild suggestions", GOLD)
+    title:SetPoint("TOPLEFT", 12, -10)
+    switch = {
+        Button(panel, "Suggest", 100, function() ShowPage(1) end),
+        Button(panel, "To decide", 120, function() ShowPage(2) end),
+    }
+    switch[2]:SetPoint("TOPRIGHT", -12, -8)
+    switch[1]:SetPoint("RIGHT", switch[2], "LEFT", -4, 0)
+
+    local content = CreateFrame("Frame", nil, panel)
+    content:SetPoint("TOPLEFT", 12, -40)
+    content:SetPoint("BOTTOMRIGHT", -12, 8)
     pages[1] = BuildSuggestPage(content)
     pages[2] = BuildDecidePage(content)
-
-    -- Tabs under the window, like the game's own panels.
-    local labels = { "Suggest", "To decide" }
-    for i, label in ipairs(labels) do
-        local okTab, t = pcall(CreateFrame, "Button", "GuildSuggestionFrameTab" .. i, f, "PanelTabButtonTemplate")
-        if not okTab or not t then
-            t = Button(f, label, 110)
-            t.plain = true
-        end
-        t:SetID(i)
-        t:SetText(label)
-        t:SetScript("OnClick", function(self) ShowPage(self:GetID()) end)
-        if i == 1 then
-            t:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 12, 2)
-        else
-            t:SetPoint("LEFT", tabs[i - 1], "RIGHT", t.plain and 4 or -15, 0)
-        end
-        if PanelTemplates_TabResize and not t.plain then
-            pcall(PanelTemplates_TabResize, t, 0)
-        end
-        tabs[i] = t
-    end
-    if PanelTemplates_SetNumTabs and not tabs[1].plain then
-        PanelTemplates_SetNumTabs(f, #tabs)
-    end
-    f:SetScript("OnShow", function()
-        UpdateTabs()
-        ShowPage(currentPage)
-    end)
-    return f
+    panel:SetScript("OnShow", function() ShowPage(currentPage) end)
 end
 
+local function MakeTab(cf)
+    local ok, b = pcall(CreateFrame, "CheckButton", "GuildSuggestionGuildTab", cf, "CommunitiesFrameTabTemplate")
+    if not ok or not b then
+        b = CreateFrame("CheckButton", "GuildSuggestionGuildTab", cf)
+        b:SetSize(32, 32)
+        local bg = b:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0, 0, 0, 0.7)
+        b:SetCheckedTexture("Interface\\Buttons\\CheckButtonHilight")
+        b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(self.tooltip, 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    b.sideTabAddon = SIDE_TAB_ID
+    b.tooltip = "Guild suggestions"
+    local icon = rawget(b, "Icon") or rawget(b, "icon")
+    if type(icon) ~= "table" then
+        icon = b:CreateTexture(nil, "ARTWORK")
+        icon:SetPoint("TOPLEFT", 2, -2)
+        icon:SetPoint("BOTTOMRIGHT", -2, 2)
+    end
+    icon:SetTexture(ICON)
+    icon:Show()
+    -- Number of suggestions waiting (the tooltip says it in words too).
+    b.badge = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    b.badge:SetPoint("BOTTOMRIGHT", -1, 2)
+    b.badge:SetTextColor(GOOD[1], GOOD[2], GOOD[3])
+    b.badge:Hide()
+    b:SetScript("OnClick", function()
+        if PlaySound and SOUNDKIT and SOUNDKIT.IG_CHARACTER_INFO_TAB then
+            pcall(PlaySound, SOUNDKIT.IG_CHARACTER_INFO_TAB)
+        end
+        b:SetChecked(true)
+        C_Timer.After(0, ns.Safe(ShowPanel, "guild tab"))
+    end)
+    b:Hide()
+    return b
+end
+
+-- Other addons' side tabs on this window (see the note above).
+local function OtherSideTabs(cf)
+    local list = {}
+    for _, child in ipairs({ cf:GetChildren() }) do
+        local id = rawget(child, "sideTabAddon")
+        if type(id) == "string" and id ~= SIDE_TAB_ID then
+            list[#list + 1] = child
+            if not hookedTabs[child] and child.HookScript then
+                hookedTabs[child] = true
+                child:HookScript("OnClick", HidePanel)
+            end
+        end
+    end
+    return list
+end
+
+local function PlaceTab(cf)
+    if not tab then
+        return
+    end
+    local guild = cf.GuildInfoTab and cf.GuildInfoTab:IsShown()
+    if not guild or not ns.GuildName() then
+        tab:Hide()
+        HidePanel()
+        return
+    end
+    local last
+    for i = #BLIZZ_TABS, 2, -1 do
+        local t = cf[BLIZZ_TABS[i]]
+        if t and t:IsShown() then
+            last = t
+            break
+        end
+    end
+    local gap = -20
+    -- Under any other addon's tab whose name comes before ours.
+    local before = {}
+    for _, t in ipairs(OtherSideTabs(cf)) do
+        if t:IsShown() and t.sideTabAddon < SIDE_TAB_ID then
+            before[#before + 1] = t
+        end
+    end
+    table.sort(before, function(a, b) return a.sideTabAddon < b.sideTabAddon end)
+    if #before > 0 then
+        last, gap = before[#before], -6
+    end
+    tab:ClearAllPoints()
+    if last then
+        tab:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, gap)
+    else
+        tab:SetPoint("TOPLEFT", cf, "TOPRIGHT", 0, -60)
+    end
+    tab:Show()
+    ns.RefreshBadge()
+    if panel:IsShown() then
+        SetBlizzardTabsChecked(cf, false)
+        tab:SetChecked(true)
+    else
+        tab:SetChecked(false)
+    end
+end
+
+local function PlaceSoon(cf)
+    -- After every addon has placed its own tab.
+    C_Timer.After(0, ns.Safe(function() PlaceTab(cf) end, "guild tab"))
+end
+
+local function Setup()
+    local cf = CommunitiesFrame
+    if tab or not cf then
+        return
+    end
+    BuildPanel(cf)
+    tab = MakeTab(cf)
+    for _, n in ipairs(BLIZZ_TABS) do
+        local t = cf[n]
+        if t and t.HookScript then
+            t:HookScript("OnClick", HidePanel)
+        end
+    end
+    if type(cf.UpdateCommunitiesTabs) == "function" then
+        hooksecurefunc(cf, "UpdateCommunitiesTabs", function() PlaceSoon(cf) end)
+    end
+    cf:HookScript("OnShow", function() PlaceSoon(cf) end)
+    cf:HookScript("OnHide", HidePanel)
+    PlaceSoon(cf)
+end
+
+local function CommunitiesLoaded()
+    if C_AddOns and C_AddOns.IsAddOnLoaded then
+        return C_AddOns.IsAddOnLoaded("Blizzard_Communities")
+    end
+    return IsAddOnLoaded and IsAddOnLoaded("Blizzard_Communities")
+end
+
+ns.On("ADDON_LOADED", function(name)
+    if name == "Blizzard_Communities" then
+        Setup()
+    end
+end)
+ns.On("IS_READY", function()
+    if CommunitiesLoaded() then
+        Setup()
+    end
+end)
+ns.On("IS_ROSTER", function() ns.RefreshBadge() end)
+
 function ns.RefreshUI()
-    if window and window:IsShown() then
-        UpdateTabs()
+    ns.RefreshBadge()
+    if panel and panel:IsShown() then
+        UpdateSwitch()
         if pages[currentPage] then
             pages[currentPage]:Refresh()
         end
     end
 end
 
+-- Opens the guild window on our tab (a name goes in the Suggest page).
+local function Open(fill)
+    if not ns.GuildName() then
+        ns.Print("you are not in a guild.")
+        return
+    end
+    if not (CommunitiesFrame and CommunitiesFrame:IsShown()) then
+        if ToggleGuildFrame then
+            pcall(ToggleGuildFrame)
+        end
+    end
+    -- The window (and our tab) may need a moment to load and lay out.
+    local tries = 0
+    local function Try()
+        tries = tries + 1
+        if not tab then Setup() end
+        if tab and tab:IsShown() and panel then
+            if fill then
+                currentPage = 1
+            elseif ns.WaitingCount() > 0 then
+                currentPage = 2
+            end
+            ShowPanel()
+            if fill then
+                local p = pages[1]
+                p.name:SetText(ns.FullName(fill) or fill)
+                p.name:UpdateHint()
+                p.msg:SetText("")
+                p.reason:SetFocus()
+            end
+        elseif tries < 10 then
+            C_Timer.After(0.1, ns.Safe(Try, "open"))
+        else
+            ns.Print("could not open the guild window. Open it and pick the Guild suggestions tab.")
+        end
+    end
+    C_Timer.After(0.05, ns.Safe(Try, "open"))
+end
+
 function ns.ToggleWindow()
-    if not ns.db or not ns.me then
+    if panel and panel:IsShown() and CommunitiesFrame and CommunitiesFrame:IsShown() then
+        HidePanel()
         return
     end
-    if not window then
-        BuildWindow()
-    end
-    if window:IsShown() then
-        window:Hide()
-    else
-        -- Waiting suggestions open on the To decide page.
-        if ns.WaitingCount() > 0 then
-            currentPage = 2
-        end
-        window:Show()
-    end
+    Open(nil)
 end
 
--- Opens the Suggest page with a name filled in.
 function ns.OpenSuggest(name)
-    if not ns.db or not ns.me then
-        return
-    end
-    if not window then
-        BuildWindow()
-    end
-    currentPage = 1
-    window:Show()
-    ShowPage(1)
-    local p = pages[1]
-    p.name:SetText(ns.FullName(name) or name or "")
-    p.name:UpdateHint()
-    p.msg:SetText("")
-    p.reason:SetFocus()
+    Open(name or "")
 end
-
--------------------------------------------------------------------------------
--- Minimap button (drag it around the edge)
--------------------------------------------------------------------------------
-
-local function PlaceMinimapButton(b)
-    local angle = math.rad(ns.db.minimap.angle or 200)
-    local radius = (Minimap:GetWidth() / 2) + 10
-    b:ClearAllPoints()
-    b:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * radius, math.sin(angle) * radius)
-end
-
-local function BuildMinimapButton()
-    local b = CreateFrame("Button", "GuildSuggestionMinimapButton", Minimap)
-    b:SetSize(31, 31)
-    b:SetFrameStrata("MEDIUM")
-    b:SetFrameLevel(8)
-    local bg = b:CreateTexture(nil, "BACKGROUND")
-    bg:SetSize(20, 20)
-    bg:SetPoint("CENTER")
-    bg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
-    local icon = b:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(18, 18)
-    icon:SetPoint("CENTER")
-    icon:SetTexture(ICON)
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    local border = b:CreateTexture(nil, "OVERLAY")
-    border:SetSize(53, 53)
-    border:SetPoint("TOPLEFT")
-    border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-    b:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
-    b:RegisterForClicks("LeftButtonUp")
-    b:RegisterForDrag("LeftButton")
-    b:SetScript("OnClick", function() ns.ToggleWindow() end)
-    b:SetScript("OnDragStart", function(self)
-        self:SetScript("OnUpdate", function()
-            local mx, my = Minimap:GetCenter()
-            local cx, cy = GetCursorPosition()
-            local scale = Minimap:GetEffectiveScale()
-            ns.db.minimap.angle = math.deg(math.atan2(cy / scale - my, cx / scale - mx))
-            PlaceMinimapButton(self)
-        end)
-    end)
-    b:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
-    -- "!" while suggestions wait for you (the tooltip says it in words too).
-    b.mark = b:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    b.mark:SetPoint("TOPRIGHT", 2, 0)
-    b.mark:SetText("!")
-    b.mark:SetTextColor(GOOD[1], GOOD[2], GOOD[3])
-    b.mark:Hide()
-    b:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText("GuildSuggestion", 1, 0.82, 0)
-        local waiting = ns.WaitingCount()
-        if waiting > 0 then
-            GameTooltip:AddLine(waiting == 1 and "1 suggestion waiting for a decision."
-                or (waiting .. " suggestions waiting for a decision."), GOOD[1], GOOD[2], GOOD[3], true)
-        end
-        GameTooltip:AddLine("Left-click: Open or close", 1, 1, 1, true)
-        GameTooltip:AddLine("Drag: Move", 0.6, 0.6, 0.6, true)
-        GameTooltip:Show()
-    end)
-    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    PlaceMinimapButton(b)
-    return b
-end
-
-function ns.RefreshMinimapMark()
-    local b = GuildSuggestionMinimapButton
-    if b and b.mark then
-        b.mark:SetShown(ns.WaitingCount() > 0)
-    end
-end
-
-ns.On("IS_READY", function()
-    if Minimap and not ns.db.minimap.hide then
-        BuildMinimapButton()
-        ns.RefreshMinimapMark()
-    end
-end)
-ns.On("IS_ROSTER", function() ns.RefreshMinimapMark() end)
 
 -------------------------------------------------------------------------------
 -- Right-click a player: "Suggest for guild invite"

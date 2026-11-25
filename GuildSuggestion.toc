@@ -2,7 +2,7 @@
 ## Title: GuildSuggestion
 ## IconTexture: Interface\Icons\INV_Letter_15
 ## Notes: Guild members suggest players to invite, with a short reason. Only members who can invite see the suggestions.
-## Version: 0.1.0
+## Version: 0.2.0
 ## SavedVariables: GuildSuggestionDB
 
 Core.lua

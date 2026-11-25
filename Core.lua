@@ -4,7 +4,7 @@
 -- Files:
 --   Core.lua  this file
 --   Comm.lua  hidden addon messages between guild members
---   UI.lua    the window, minimap button and right-click menu entry
+--   UI.lua    the tab in the guild window and the right-click menu entry
 
 local ADDON_NAME, ns = ...
 
@@ -13,8 +13,6 @@ ns.MAX_REASON = 200
 
 local DEFAULTS = {
     guilds = {},  -- [guild name] = { items = {}, mine = {} }, see ns.Guild
-    minimap = { angle = 200, hide = false },
-    window = {},  -- where the window was left
 }
 
 -------------------------------------------------------------------------------
@@ -130,6 +128,19 @@ function ns.Ago(t)
     return d == 1 and "1 day ago" or (d .. " days ago")
 end
 
+-- Your target's full name, if it's a player.
+function ns.TargetName()
+    if not UnitIsPlayer or not UnitIsPlayer("target") then
+        return nil
+    end
+    local first, second = UnitName("target")
+    if type(first) ~= "string" or ns.IsSecret(first) then
+        return nil
+    end
+    local raw = (type(second) == "string" and not ns.IsSecret(second) and second ~= "") and (first .. " " .. second) or first
+    return ns.FullName(raw) or raw
+end
+
 function ns.NewId()
     return string.format("%x%04x", time(), math.random(0, 65535))
 end
@@ -198,6 +209,7 @@ handlers.ADDON_LOADED = { function(name)
     end
     GuildSuggestionDB = MergeDefaults(DEFAULTS, GuildSuggestionDB or {})
     ns.db = GuildSuggestionDB
+    ns.db.minimap, ns.db.window = nil, nil -- 0.1 had a minimap button and its own window
 end }
 handlers.PLAYER_LOGIN = { function()
     local first, second = UnitName("player")
@@ -383,8 +395,16 @@ SLASH_GUILDSUGGESTION1 = "/gsuggest"
 SLASH_GUILDSUGGESTION2 = "/guildsuggestion"
 SlashCmdList.GUILDSUGGESTION = function(input)
     local text = strtrim(input or "")
+    -- The game only swaps %t for your target in chat, not in addon commands.
+    if text:lower() == "%t" or text:lower() == "target" then
+        text = ns.TargetName() or ""
+        if text == "" then
+            ns.Print("target a player first.")
+            return
+        end
+    end
     if text:lower() == "help" then
-        ns.Print("/gsuggest opens the window. /gsuggest First Surname fills in a name.")
+        ns.Print("/gsuggest opens Guild suggestions in the guild window. /gsuggest First Surname or /gsuggest %t fills in a name.")
     elseif text ~= "" then
         ns.OpenSuggest(text)
     else
