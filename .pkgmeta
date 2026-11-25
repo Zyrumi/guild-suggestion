@@ -1,0 +1,16 @@
+# CurseForge / BigWigs packager settings. The package holds one folder named
+# like the .toc, with only what the game needs (same as tools/build_zip.py).
+package-as: GuildSuggestion
+
+ignore:
+  - tools
+  - art
+  - CURSEFORGE.md
+  - .gitignore
+  - .github
+  - CHANGELOG.md
+
+# Uploaded as the file's changelog. Holds the notes for the release being tagged.
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
