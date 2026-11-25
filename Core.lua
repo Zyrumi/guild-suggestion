@@ -1,4 +1,4 @@
--- Invite Suggestions: core
+-- GuildSuggestion: core
 -- Saved data, names, the guild roster, who may invite, events, slash command.
 --
 -- Files:
@@ -22,7 +22,7 @@ local DEFAULTS = {
 -------------------------------------------------------------------------------
 
 function ns.Print(msg)
-    print("|cffffd100Invite Suggestions:|r " .. msg)
+    print("|cffffd100GuildSuggestion:|r " .. msg)
 end
 
 -- Midnight-era clients can hand addons "secret" values; treat as unknown.
@@ -196,8 +196,8 @@ handlers.ADDON_LOADED = { function(name)
     if name ~= ADDON_NAME then
         return
     end
-    InviteSuggestionsDB = MergeDefaults(DEFAULTS, InviteSuggestionsDB or {})
-    ns.db = InviteSuggestionsDB
+    GuildSuggestionDB = MergeDefaults(DEFAULTS, GuildSuggestionDB or {})
+    ns.db = GuildSuggestionDB
 end }
 handlers.PLAYER_LOGIN = { function()
     local first, second = UnitName("player")
@@ -379,12 +379,12 @@ end)
 -- Slash command
 -------------------------------------------------------------------------------
 
-SLASH_INVITESUGGESTIONS1 = "/suggest"
-SLASH_INVITESUGGESTIONS2 = "/invitesuggestions"
-SlashCmdList.INVITESUGGESTIONS = function(input)
+SLASH_GUILDSUGGESTION1 = "/gsuggest"
+SLASH_GUILDSUGGESTION2 = "/guildsuggestion"
+SlashCmdList.GUILDSUGGESTION = function(input)
     local text = strtrim(input or "")
     if text:lower() == "help" then
-        ns.Print("/suggest opens the window. /suggest First Surname fills in a name.")
+        ns.Print("/gsuggest opens the window. /gsuggest First Surname fills in a name.")
     elseif text ~= "" then
         ns.OpenSuggest(text)
     else

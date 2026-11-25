@@ -1,4 +1,4 @@
--- Invite Suggestions: hidden addon messages between guild members
+-- GuildSuggestion: hidden addon messages between guild members
 --
 -- Who sees what:
 --   Everyone with the addon says a short hello on the guild channel: name and
@@ -25,7 +25,7 @@
 
 local ADDON_NAME, ns = ...
 
-local PREFIX = "InviteSuggest"
+local PREFIX = "GuildSuggest"
 local MAX_LEN = 240
 local GUILD = "@guild"
 
@@ -232,9 +232,9 @@ local function NoteNew(it)
         newTimer = false
         if newCount == 1 and ns.lastNew then
             ns.Print("new invite suggestion: " .. ns.Show(ns.lastNew.target) .. " (from " .. ns.Show(ns.lastNew.by)
-                .. "). Type /suggest to see it.")
+                .. "). Type /gsuggest to see it.")
         elseif newCount > 1 then
-            ns.Print(newCount .. " new invite suggestions. Type /suggest to see them.")
+            ns.Print(newCount .. " new invite suggestions. Type /gsuggest to see them.")
         end
         newCount = 0
         ns.lastNew = nil

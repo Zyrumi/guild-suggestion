@@ -1,4 +1,4 @@
--- Invite Suggestions: the window, minimap button and right-click menu entry.
+-- GuildSuggestion: the window, minimap button and right-click menu entry.
 --
 -- Page "Suggest": name + reason, and your own suggestions with their status.
 -- Page "To decide": only for members who may invite. Waiting suggestions
@@ -322,7 +322,7 @@ local function ConfirmDecline(it)
         ns.Decide(it.id, "declined")
         return
     end
-    StaticPopupDialogs.INVITESUGGESTIONS_DECLINE = StaticPopupDialogs.INVITESUGGESTIONS_DECLINE or {
+    StaticPopupDialogs.GUILDSUGGESTION_DECLINE = StaticPopupDialogs.GUILDSUGGESTION_DECLINE or {
         text = "%s",
         button1 = "Decline",
         button2 = "Cancel",
@@ -338,7 +338,7 @@ local function ConfirmDecline(it)
     }
     local text = "Decline " .. ns.Show(it.target) .. "?\n\n" .. ns.Show(it.by)
         .. " will see that the suggestion was not accepted (not who declined it)."
-    StaticPopup_Show("INVITESUGGESTIONS_DECLINE", text, nil, it.id)
+    StaticPopup_Show("GUILDSUGGESTION_DECLINE", text, nil, it.id)
 end
 
 local function DecideRow(list)
@@ -513,10 +513,10 @@ local function SavePlace()
 end
 
 local function BuildWindow()
-    local ok, f = pcall(CreateFrame, "Frame", "InviteSuggestionsFrame", UIParent, "ButtonFrameTemplate")
+    local ok, f = pcall(CreateFrame, "Frame", "GuildSuggestionFrame", UIParent, "ButtonFrameTemplate")
     local framed = ok and f
     if not framed then
-        f = CreateFrame("Frame", "InviteSuggestionsFrame", UIParent, "BackdropTemplate")
+        f = CreateFrame("Frame", "GuildSuggestionFrame", UIParent, "BackdropTemplate")
         if f.SetBackdrop then
             f:SetBackdrop({
                 bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
@@ -527,7 +527,7 @@ local function BuildWindow()
         end
         local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
         close:SetPoint("TOPRIGHT", -4, -4)
-        local title = Text(f, "GameFontNormal", "Invite Suggestions", GOLD)
+        local title = Text(f, "GameFontNormal", "GuildSuggestion", GOLD)
         title:SetPoint("TOP", 0, -16)
     end
     window = f
@@ -550,14 +550,14 @@ local function BuildWindow()
         SavePlace()
     end)
     f:Hide()
-    tinsert(UISpecialFrames, "InviteSuggestionsFrame")
+    tinsert(UISpecialFrames, "GuildSuggestionFrame")
 
     if framed then
         if ButtonFrameTemplate_HideButtonBar then
             pcall(ButtonFrameTemplate_HideButtonBar, f)
         end
         if f.SetTitle then
-            pcall(f.SetTitle, f, "Invite Suggestions")
+            pcall(f.SetTitle, f, "GuildSuggestion")
         end
         if f.SetPortraitToAsset then
             pcall(f.SetPortraitToAsset, f, ICON)
@@ -580,7 +580,7 @@ local function BuildWindow()
     -- Tabs under the window, like the game's own panels.
     local labels = { "Suggest", "To decide" }
     for i, label in ipairs(labels) do
-        local okTab, t = pcall(CreateFrame, "Button", "InviteSuggestionsFrameTab" .. i, f, "PanelTabButtonTemplate")
+        local okTab, t = pcall(CreateFrame, "Button", "GuildSuggestionFrameTab" .. i, f, "PanelTabButtonTemplate")
         if not okTab or not t then
             t = Button(f, label, 110)
             t.plain = true
@@ -665,7 +665,7 @@ local function PlaceMinimapButton(b)
 end
 
 local function BuildMinimapButton()
-    local b = CreateFrame("Button", "InviteSuggestionsMinimapButton", Minimap)
+    local b = CreateFrame("Button", "GuildSuggestionMinimapButton", Minimap)
     b:SetSize(31, 31)
     b:SetFrameStrata("MEDIUM")
     b:SetFrameLevel(8)
@@ -704,7 +704,7 @@ local function BuildMinimapButton()
     b.mark:Hide()
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText("Invite Suggestions", 1, 0.82, 0)
+        GameTooltip:SetText("GuildSuggestion", 1, 0.82, 0)
         local waiting = ns.WaitingCount()
         if waiting > 0 then
             GameTooltip:AddLine(waiting == 1 and "1 suggestion waiting for a decision."
@@ -720,7 +720,7 @@ local function BuildMinimapButton()
 end
 
 function ns.RefreshMinimapMark()
-    local b = InviteSuggestionsMinimapButton
+    local b = GuildSuggestionMinimapButton
     if b and b.mark then
         b.mark:SetShown(ns.WaitingCount() > 0)
     end
