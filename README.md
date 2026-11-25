@@ -8,4 +8,4 @@ Open the guild window and pick the Guild suggestions tab under the game's own ta
 
 Everyone involved needs the addon: the member making a suggestion and the members who can invite.
 
-Project icon: [Envelope](https://game-icons.net/1x1/lorc/envelope.html) by Lorc, from [game-icons.net](https://game-icons.net), licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Recoloured.
+Project icon: [Trumpet flag](https://game-icons.net/1x1/delapouite/trumpet-flag.html) by Delapouite, from [game-icons.net](https://game-icons.net), licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Recoloured.

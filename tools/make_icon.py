@@ -1,6 +1,6 @@
-# Builds the GuildSuggestion project icon from "Envelope" by Lorc
-# (https://game-icons.net/1x1/lorc/envelope.html, CC BY 3.0, credited in the
-# README and the CurseForge description): gold on a dark blue tile.
+# Builds the GuildSuggestion project icon from "Trumpet flag" by Delapouite
+# (https://game-icons.net/1x1/delapouite/trumpet-flag.html, CC BY 3.0, credited in the
+# README and the CurseForge description): ivory on a deep green tile (its own look, not Libram's fill).
 # Writes art/curseforge-icon.png (512 x 512) and a 64 x 64 preview.
 # Run: python -I tools/make_icon.py
 import os
@@ -8,13 +8,13 @@ from PIL import Image, ImageDraw
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ART = os.path.join(HERE, "..", "art")
-SRC = os.path.join(ART, "source", "lorc-envelope.png")  # white on transparent, 512 x 512
+SRC = os.path.join(ART, "source", "delapouite-trumpet-flag.png")  # white on transparent, 512 x 512
 
 SIZE = 512
 INSET = 0.80   # the icon takes 80% of the tile
 RADIUS = 72
-TILE = ((40, 62, 110), (12, 18, 38))       # tile: middle, edges (dark blue)
-GOLD = ((255, 232, 150), (214, 160, 40))     # icon: top, bottom
+TILE = ((36, 96, 64), (8, 32, 20))         # tile: middle, edges (deep green)
+IVORY = ((252, 248, 232), (214, 200, 160))  # icon: top, bottom
 
 
 def mix(a, b, t):
@@ -33,12 +33,12 @@ def main():
         for x in range(SIZE):
             px[x, y] = mix(*TILE, min(1.0, (((x - c) ** 2 + (y - c) ** 2) ** 0.5) / far))
 
-    gold = Image.new("RGB", (1, mask.height))
+    fill = Image.new("RGB", (1, mask.height))
     for y in range(mask.height):
-        gold.putpixel((0, y), mix(*GOLD, y / (mask.height - 1)))
-    gold = gold.resize(mask.size)
+        fill.putpixel((0, y), mix(*IVORY, y / (mask.height - 1)))
+    fill = fill.resize(mask.size)
     off = (SIZE - mask.width) // 2
-    tile.paste(gold, (off, off), mask)
+    tile.paste(fill, (off, off), mask)
 
     corners = Image.new("L", (SIZE, SIZE), 0)
     ImageDraw.Draw(corners).rounded_rectangle([0, 0, SIZE - 1, SIZE - 1], RADIUS, fill=255)

@@ -24,4 +24,4 @@ Addons can only talk to players who are online, and there is no server behind th
 
 Feedback and bug reports are welcome on the GitHub page.
 
-Icon: [Envelope](https://game-icons.net/1x1/lorc/envelope.html) by Lorc, [game-icons.net](https://game-icons.net), [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/), recoloured.
+Icon: [Trumpet flag](https://game-icons.net/1x1/delapouite/trumpet-flag.html) by Delapouite, [game-icons.net](https://game-icons.net), [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/), recoloured.
