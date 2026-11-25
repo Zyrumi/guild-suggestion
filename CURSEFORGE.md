@@ -23,3 +23,5 @@ A reason is only ever sent to members whose guild rank can invite (the guild mas
 Addons can only talk to players who are online, and there is no server behind this addon. A suggestion waits on your side until someone who can invite is online at the same time as you, then goes out by itself. Everyone involved needs the addon: the member making a suggestion and the members who can invite.
 
 Feedback and bug reports are welcome on the GitHub page.
+
+Icon: [Envelope](https://game-icons.net/1x1/lorc/envelope.html) by Lorc, [game-icons.net](https://game-icons.net), [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/), recoloured.
