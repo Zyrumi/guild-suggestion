@@ -299,7 +299,7 @@ function ns.Suggest(rawTarget, rawReason)
     if #to > 0 then
         return true, "Sent."
     end
-    return true, "Saved. It goes out when a member who can invite is online at the same time as you."
+    return true, "Saved. It's sent when a member who can invite is online."
 end
 
 -- An inviter's choice: "invited", "declined" or "removed". Removing only

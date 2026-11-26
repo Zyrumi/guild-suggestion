@@ -243,7 +243,7 @@ local function MineRow(list)
     row.name:SetPoint("RIGHT", row.status, "LEFT", -8, 0)
     row.name:SetWordWrap(false)
     row.remove:SetScript("OnEnter", function(self)
-        ShowTip(self, "Remove from your list", "Only removes it here. It stays with the members who can invite.")
+        ShowTip(self, "Remove from your list")
     end)
     row.remove:SetScript("OnLeave", HideTip)
     row:EnableMouse(true)
@@ -392,9 +392,9 @@ local function BuildSuggestPage(parent)
             p.who:SetText("Anyone you suggest shows up on the To decide list.")
         else
             local n = #ns.OnlineInviters()
-            local start = "Your suggestion shows up on the To decide list of the members who can invite. You see their answer below. "
-            p.who:SetText(start .. (n == 0 and "None of them is online right now, so it waits until one is online at the same time as you."
-                or (n == 1 and "1 of them is online now." or (n .. " of them are online now."))))
+            p.who:SetText(n == 0 and "Members who can invite decide. None of them is online right now."
+                or (n == 1 and "Members who can invite decide. 1 of them is online now."
+                or ("Members who can invite decide. " .. n .. " of them are online now.")))
         end
     end
     return p
@@ -521,8 +521,7 @@ local function DecideRow(list)
     row.invite:SetScript("OnEnter", function(self)
         local g = ns.Guild()
         local it = g and g.items[self:GetParent().id]
-        ShowTip(self, "Invite", "Shows " .. (it and ns.Show(it.target) or "the name") .. " ready to copy. Copy it, click Invite Member,"
-            .. " paste, Accept. WoW only lets its own window send guild invites.")
+        ShowTip(self, "Invite " .. (it and ns.Show(it.target) or ""), "Copy the name, click Invite Member, paste, Accept.")
     end)
     row.invite:SetScript("OnLeave", HideTip)
     row.invite:SetPoint("TOPRIGHT", -84, -1)
