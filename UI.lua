@@ -167,16 +167,14 @@ local function MineRow(list)
     row.name = Text(row, "GameFontHighlight")
     row.name:SetPoint("TOPLEFT", 2, -4)
     row.status = Text(row, "GameFontNormalSmall")
-    row.status:SetPoint("TOPRIGHT", -26, -5)
+    row.status:SetPoint("TOPRIGHT", -84, -5)
     row.status:SetJustifyH("RIGHT")
     row.reason = Text(row, "GameFontHighlightSmall", "", DIM)
     row.reason:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -3)
-    row.reason:SetPoint("RIGHT", -26, 0)
+    row.reason:SetPoint("RIGHT", -84, 0)
     row.reason:SetWordWrap(false)
-    row.remove = CreateFrame("Button", nil, row, "UIPanelCloseButton")
-    row.remove:SetSize(20, 20)
-    row.remove:SetPoint("TOPRIGHT", 0, -1)
-    row.remove:SetScript("OnClick", function(self) ns.ForgetMine(self:GetParent().id) end)
+    row.remove = Button(row, "Remove", 76, function(self) ns.ForgetMine(self:GetParent().id) end)
+    row.remove:SetPoint("TOPRIGHT", -4, -1)
     row.remove:SetScript("OnEnter", function(self)
         ShowTip(self, "Remove from your list", "Only removes it here. It stays with the members who can invite.")
     end)
@@ -348,12 +346,12 @@ end
 -- with a name the player gave it: an addon can't invite, not even through a
 -- secure macro button, and a name the addon writes into a box or the chat
 -- line is marked as the addon's and blocked too (all tried in game).
--- What works: Blizzard's own "Invite Member" button (bottom of the guild
--- Chat page) opens the Add Guild Member box, and Shift-clicking a player
--- link while that box is open makes Blizzard's code fill in the name
--- (ItemRefHandlers: HandlePlayerLink), special characters and all. So
--- Invite prints the name as a link and points at Invite Member; Shift-click,
--- Accept. Comm.lua marks the suggestion once the game confirms.
+-- What works (confirmed in game): Blizzard's own "Invite Member" button
+-- (bottom of the guild Chat page) opens the Add Guild Member box, and the
+-- player pastes the name there themselves. So Invite shows the name selected
+-- in a box (Ctrl+C) and highlights Invite Member; Ctrl+V, Accept. Your own
+-- copy and paste count as typing. Comm.lua marks the suggestion once the
+-- game confirms.
 local glow
 
 local function PointAtInviteMember(button)
@@ -402,23 +400,14 @@ function ns.StopGlow()
 end
 
 local function InviteHelp(it)
-    local name = it.target
-    if pages[2] and pages[2].ShowCopy then
-        pages[2].ShowCopy(name)
-    end
-    local link
-    if GetPlayerLink then
-        local ok, l = pcall(GetPlayerLink, name, "[" .. ns.Show(name) .. "]")
-        link = ok and l or nil
-    end
-    link = link or ("|Hplayer:" .. name .. "|h[" .. ns.Show(name) .. "]|h")
     local cf = CommunitiesFrame
     local button = cf and rawget(cf, "InviteButton")
-    if button and button:IsShown() and button:IsEnabled() then
+    local ready = button and button:IsShown() and button:IsEnabled()
+    if pages[2] and pages[2].ShowCopy then
+        pages[2].ShowCopy(it.target, not ready)
+    end
+    if ready then
         PointAtInviteMember(button)
-        ns.Print("click Invite Member (bottom of the guild window), then Shift-click " .. link .. " (or paste the name from the box) and Accept.")
-    else
-        ns.Print("open the guild Chat page (speech bubble tab), click Invite Member, then Shift-click " .. link .. " (or paste the name from the box) and Accept.")
     end
 end
 
@@ -446,8 +435,8 @@ local function DecideRow(list)
     row.invite:SetScript("OnEnter", function(self)
         local g = ns.Guild()
         local it = g and g.items[self:GetParent().id]
-        ShowTip(self, "Invite", "Puts " .. (it and ns.Show(it.target) or "the name") .. " in chat as a link. Click Invite Member,"
-            .. " Shift-click the name and Accept. WoW only lets its own window send guild invites.")
+        ShowTip(self, "Invite", "Shows " .. (it and ns.Show(it.target) or "the name") .. " ready to copy. Ctrl+C, click Invite Member,"
+            .. " Ctrl+V, Accept. WoW only lets its own window send guild invites.")
     end)
     row.invite:SetScript("OnLeave", HideTip)
     row.invite:SetPoint("TOPRIGHT", -84, -1)
@@ -538,10 +527,8 @@ local function BuildDecidePage(parent)
     label:SetPoint("LEFT", 0, 0)
     local box = Input(strip, 220, "")
     box:SetPoint("LEFT", label, "RIGHT", 10, 0)
-    local close = CreateFrame("Button", nil, strip, "UIPanelCloseButton")
-    close:SetSize(22, 22)
+    local close = Button(strip, "Close", 64, function() p.HideCopy() end)
     close:SetPoint("RIGHT", 0, 0)
-    close:SetScript("OnClick", function() p.HideCopy() end)
     local hint = Text(strip, "GameFontHighlightSmall", "Ctrl+C, click Invite Member, Ctrl+V, Accept.", WHITE)
     hint:SetPoint("LEFT", box, "RIGHT", 10, 0)
     hint:SetPoint("RIGHT", close, "LEFT", -4, 0)
@@ -556,8 +543,11 @@ local function BuildDecidePage(parent)
     end)
     box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
     box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    function p.ShowCopy(name)
+    -- otherPage: Invite Member isn't on screen (the window shows another page).
+    function p.ShowCopy(name, otherPage)
         strip.name = name
+        hint:SetText(otherPage and "Ctrl+C, open the guild Chat page, click Invite Member, Ctrl+V, Accept."
+            or "Ctrl+C, click Invite Member, Ctrl+V, Accept.")
         box:SetText(name)
         strip:Show()
         box:SetFocus()
