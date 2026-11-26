@@ -19,6 +19,7 @@
 --   ST  status: id^status                                 inviter -> member
 --   DL  my list: id:rev,id:rev,...                        inviter -> inviter
 --   DQ  please send: id,id,...                            inviter -> inviter
+--   PI  online check: empty, to a suggested player (see ns.CheckOnline)
 --   DI  one suggestion: id^rev^target^by^at^status^decidedBy^decidedAt^reason^removedBy^removedAt^level^class
 --
 -- Long messages are split in parts; sending is paced and pauses in combat.
@@ -684,6 +685,38 @@ end)
 -- named X is currently playing". Hide that line for our own hidden whispers.
 -------------------------------------------------------------------------------
 
+-------------------------------------------------------------------------------
+-- Is a suggested player online? A hidden addon whisper to them: when they're
+-- offline the game answers "No player named X is currently playing" (caught
+-- and hidden below); no answer means they're online. At most once a minute
+-- per name.
+-------------------------------------------------------------------------------
+
+local onlineState = {} -- [name] = { state = "online" | "offline", at = GetTime() }
+local pinged = {}      -- [name] = GetTime() of the last check
+
+function ns.CheckOnline(name)
+    if not name or (pinged[name] and GetTime() - pinged[name] < 60) then
+        return
+    end
+    local sentAt = GetTime()
+    pinged[name] = sentAt
+    Queue(name, "PI", "", "PI" .. name)
+    C_Timer.After(6, ns.Safe(function()
+        local s = onlineState[name]
+        if not (s and s.state == "offline" and s.at >= sentAt) then
+            onlineState[name] = { state = "online", at = GetTime() }
+            Refresh()
+        end
+    end, "online check"))
+end
+
+-- "online", "offline" or nil (not checked yet).
+function ns.OnlineState(name)
+    local s = name and onlineState[name]
+    return s and s.state or nil
+end
+
 local function SystemFilter(_, _, msg)
     if type(msg) ~= "string" or ns.IsSecret(msg) or not ERR_CHAT_PLAYER_NOT_FOUND_S then
         return false
@@ -693,6 +726,10 @@ local function SystemFilter(_, _, msg)
         if now - t < 10 then
             local first = target:match("^[^%s%-]+")
             if msg == ERR_CHAT_PLAYER_NOT_FOUND_S:format(target) or msg == ERR_CHAT_PLAYER_NOT_FOUND_S:format(first) then
+                if pinged[target] then
+                    onlineState[target] = { state = "offline", at = now }
+                    Refresh()
+                end
                 heard[target] = nil
                 ForgetQueued(target)
                 return true

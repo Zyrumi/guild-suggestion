@@ -573,7 +573,9 @@ local function FillDecide(row, e)
     local waiting = it.status == "new"
     local by = ns.Colored(it.by, ns.MemberClass(it.by))
     if waiting then
-        row.from:SetText(ns.InfoText(it.level, it.class) .. ", from " .. by .. ", " .. ns.Ago(it.at))
+        local state = ns.OnlineState(it.target)
+        local online = (state == "online" and "|cff4ee44eonline|r") or (state == "offline" and "|cff9d9d9doffline|r") or "checking"
+        row.from:SetText(ns.InfoText(it.level, it.class) .. ", " .. online .. ", from " .. by .. ", " .. ns.Ago(it.at))
         row.reason:SetText(it.reason ~= "" and it.reason or "(no reason given)")
         row.reason:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
     else
@@ -600,6 +602,15 @@ local function BuildDecidePage(parent)
     p.list:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -4, 34)
     p.list.MakeRow = DecideRow
     p.list.FillRow = FillDecide
+    -- While the page is open, check again now and then (once a minute per name).
+    local since = 0
+    p:SetScript("OnUpdate", function(self, elapsed)
+        since = since + elapsed
+        if since > 30 then
+            since = 0
+            self:Refresh()
+        end
+    end)
 
     -- After Invite: the name, selected, for you to copy and paste into
     -- Blizzard's Add Guild Member box (wording without key names, so it fits
@@ -663,6 +674,7 @@ local function BuildDecidePage(parent)
             for _, it in pairs(g.items) do
                 if it.status == "new" then
                     waiting[#waiting + 1] = it
+                    ns.CheckOnline(it.target)
                 elseif (it.status == "invited" or it.status == "declined") and not it.removedAt then
                     decided[#decided + 1] = it
                 end
