@@ -141,6 +141,79 @@ function ns.TargetName()
     return ns.FullName(raw) or raw
 end
 
+-- Class and level, checked (nil when unknown or hidden by the game).
+function ns.ValidClass(c)
+    if type(c) ~= "string" or ns.IsSecret(c) or not c:match("^%u+$") then
+        return nil
+    end
+    if RAID_CLASS_COLORS and not RAID_CLASS_COLORS[c] then
+        return nil
+    end
+    return c
+end
+
+function ns.ValidLevel(l)
+    if ns.IsSecret(l) then
+        return nil
+    end
+    l = tonumber(l)
+    return (l and l >= 1 and l <= 200) and math.floor(l) or nil
+end
+
+-- A player's level and class from a unit the game shows us right now.
+function ns.UnitInfo(unit)
+    if not UnitIsPlayer or not UnitExists or not UnitExists(unit) or not UnitIsPlayer(unit) then
+        return nil
+    end
+    local first, second = UnitName(unit)
+    if type(first) ~= "string" or ns.IsSecret(first) then
+        return nil
+    end
+    local raw = (type(second) == "string" and not ns.IsSecret(second) and second ~= "") and (first .. " " .. second) or first
+    local _, class = UnitClass(unit)
+    return ns.FullName(raw) or raw, ns.ValidLevel(UnitLevel(unit)), ns.ValidClass(class)
+end
+
+-- Level and class of a player by name, if the game shows them anywhere we
+-- can look: your target, mouseover, focus or your group.
+function ns.LookupPlayer(name)
+    local units = { "target", "mouseover", "focus" }
+    for i = 1, 4 do units[#units + 1] = "party" .. i end
+    for i = 1, 40 do units[#units + 1] = "raid" .. i end
+    for _, unit in ipairs(units) do
+        local n, level, class = ns.UnitInfo(unit)
+        if n == name then
+            return level, class
+        end
+    end
+    return nil, nil
+end
+
+function ns.ClassName(class)
+    local names = LOCALIZED_CLASS_NAMES_MALE
+    return class and ((names and names[class]) or (class:sub(1, 1) .. class:sub(2):lower())) or nil
+end
+
+-- A name in its class colour (plain when the class isn't known).
+function ns.Colored(name, class)
+    local text = ns.Show(name)
+    local c = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+    if c and c.colorStr then
+        return "|c" .. c.colorStr .. text .. "|r"
+    elseif c and c.r then
+        return string.format("|cff%02x%02x%02x%s|r", c.r * 255, c.g * 255, c.b * 255, text)
+    end
+    return text
+end
+
+-- "Lvl 23 Mage", "Lvl 23", "Mage" or "level unknown".
+function ns.InfoText(level, class)
+    local parts = {}
+    if level then parts[#parts + 1] = "Lvl " .. level end
+    if class then parts[#parts + 1] = ns.ClassName(class) end
+    return #parts > 0 and table.concat(parts, " ") or "level unknown"
+end
+
 function ns.NewId()
     return string.format("%x%04x", time(), math.random(0, 65535))
 end
@@ -271,7 +344,7 @@ local function ReadRoster()
     end
     local full, first = {}, {}
     for i = 1, n do
-        local ok, raw, _, rankIndex, _, _, _, _, _, online = pcall(GetGuildRosterInfo, i)
+        local ok, raw, _, rankIndex, level, _, _, _, _, online, _, class = pcall(GetGuildRosterInfo, i)
         if ok and type(raw) == "string" and not ns.IsSecret(raw) then
             local name = ns.FullName(raw)
             if not name and ns.forever then
@@ -280,7 +353,8 @@ local function ReadRoster()
             end
             if name then
                 local rank = (not ns.IsSecret(rankIndex)) and tonumber(rankIndex) or nil
-                full[name] = { rank = rank, online = (not ns.IsSecret(online)) and online and true or false }
+                full[name] = { rank = rank, online = (not ns.IsSecret(online)) and online and true or false,
+                    class = ns.ValidClass(class), level = ns.ValidLevel(level) }
                 local f = ns.FirstName(name)
                 if first[f] == nil then
                     first[f] = name
@@ -323,6 +397,12 @@ end
 -- Whether a name (as the roster or a message gave it) is you.
 function ns.IsMe(name)
     return name ~= nil and (name == ns.me or ns.Member(ns.me) == name)
+end
+
+-- A guild member's class (from the roster).
+function ns.MemberClass(name)
+    local m = name and roster.full[name]
+    return m and m.class or nil
 end
 
 function ns.IsOnline(name)

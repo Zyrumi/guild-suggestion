@@ -14,12 +14,12 @@
 -- Guild channel:
 --   HI  hello: ver^reply^full name^may invite (1/0)
 -- Whispers:
---   SG  suggestion: id^target^at^reason                   member -> inviter
+--   SG  suggestion: id^target^at^reason^level^class       member -> inviter
 --   OK  got it: id                                        inviter -> member
 --   ST  status: id^status                                 inviter -> member
 --   DL  my list: id:rev,id:rev,...                        inviter -> inviter
 --   DQ  please send: id,id,...                            inviter -> inviter
---   DI  one suggestion: id^rev^target^by^at^status^decidedBy^decidedAt^reason^removedBy^removedAt
+--   DI  one suggestion: id^rev^target^by^at^status^decidedBy^decidedAt^reason^removedBy^removedAt^level^class
 --
 -- Long messages are split in parts; sending is paced and pauses in combat.
 
@@ -176,11 +176,12 @@ end
 
 local function ItemPayload(it)
     return table.concat({ it.id, it.rev or 1, it.target, it.by, it.at or 0, it.status or "new",
-        it.decidedBy or "", it.decidedAt or 0, it.reason or "", it.removedBy or "", it.removedAt or 0 }, "^")
+        it.decidedBy or "", it.decidedAt or 0, it.reason or "", it.removedBy or "", it.removedAt or 0,
+        it.level or 0, it.class or "" }, "^")
 end
 
 local function SendSuggestion(to, m)
-    Queue(to, "SG", table.concat({ m.id, m.target, m.at or 0, m.reason or "" }, "^"), "SG" .. m.id)
+    Queue(to, "SG", table.concat({ m.id, m.target, m.at or 0, m.reason or "", m.level or 0, m.class or "" }, "^"), "SG" .. m.id)
 end
 
 -- Your waiting suggestions go to everyone online who may invite.
@@ -276,12 +277,15 @@ function ns.Suggest(rawTarget, rawReason)
         return false, ns.Show(target) .. " is already in the guild."
     end
     local reason = ns.Clean(rawReason, ns.MAX_REASON)
-    local m = { id = ns.NewId(), target = target, reason = reason, by = ns.MyKey(), at = time(), status = "new" }
+    local level, class = ns.LookupPlayer(target)
+    local m = { id = ns.NewId(), target = target, reason = reason, by = ns.MyKey(), at = time(), status = "new",
+        level = level, class = class }
     g.mine[m.id] = m
     if IMayInvite() then
         -- You may invite yourself: it goes straight on your list and to the others.
         m.delivered = true
-        local it = { id = m.id, rev = 1, target = target, reason = reason, by = ns.MyKey(), at = m.at, status = "new" }
+        local it = { id = m.id, rev = 1, target = target, reason = reason, by = ns.MyKey(), at = m.at, status = "new",
+            level = level, class = class }
         g.items[it.id] = it
         PushItem(it)
         Refresh()
@@ -324,6 +328,31 @@ function ns.Decide(id, status)
     TellSuggester(it)
     Refresh()
 end
+
+-- Seeing a suggested player (target or mouseover) fills in or updates their
+-- level and class on your side.
+local function Seen(unit)
+    local name, level, class = ns.UnitInfo(unit)
+    local g = name and ns.GuildName() and ns.Guild()
+    if not g or (not level and not class) then
+        return
+    end
+    local changed = false
+    for _, list in ipairs({ g.items, g.mine }) do
+        for _, it in pairs(list) do
+            if it.target == name and (it.level ~= (level or it.level) or it.class ~= (class or it.class)) then
+                it.level = level or it.level
+                it.class = class or it.class
+                changed = true
+            end
+        end
+    end
+    if changed then
+        Refresh()
+    end
+end
+ns.On("PLAYER_TARGET_CHANGED", function() Seen("target") end)
+ns.On("UPDATE_MOUSEOVER_UNIT", function() Seen("mouseover") end)
 
 -- Your whole list (only on your side; ones not sent yet are cancelled).
 function ns.ClearMine()
@@ -415,7 +444,8 @@ function Whisper.SG(from, payload)
     if not g.items[id] then
         local now = time()
         local it = { id = id, rev = 1, target = target, reason = reason, by = from,
-            at = (at and at <= now and at > now - 365 * 86400) and at or now, status = "new" }
+            at = (at and at <= now and at > now - 365 * 86400) and at or now, status = "new",
+            level = ns.ValidLevel(f[5]), class = ns.ValidClass(f[6]) }
         g.items[id] = it
         NoteNew(it)
         PushItem(it, from)
@@ -517,6 +547,8 @@ function Whisper.DI(from, payload)
         removedBy = ((f[10] or "") ~= "" and (ns.Member(f[10]) or ns.FullName(f[10]))) or nil,
         removedAt = (tonumber(f[11]) or 0) ~= 0 and tonumber(f[11]) or nil,
         told = old and old.told or nil,
+        level = ns.ValidLevel(f[12]) or (old and old.level) or nil,
+        class = ns.ValidClass(f[13]) or (old and old.class) or nil,
     }
     g.items[id] = it
     if not old and status == "new" then

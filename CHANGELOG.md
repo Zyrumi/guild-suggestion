@@ -6,3 +6,5 @@
 - Suggest, To decide and Log are game-style tabs.
 - Lists use the game's own scroll bar, and only scroll when there are more entries than fit.
 - Your suggestions take one line each (hover for the reason), with a small X to remove one and a Clear list button.
+- Suggested players show their level and class (picked up when the suggester has them targeted or in their group, and whenever anyone with the addon targets or mouses over them), so you know who you're inviting. Names are in class colours.
+- Log filters: who did it and what action.

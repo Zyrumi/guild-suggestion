@@ -262,7 +262,7 @@ end
 local function FillMine(row, e)
     local m = e.mine
     row.id, row.target, row.fullReason = m.id, m.target, m.reason
-    row.name:SetText(ns.Show(m.target))
+    row.name:SetText(ns.Colored(m.target, m.class) .. "  |cffa6a6a6" .. ns.InfoText(m.level, m.class) .. "|r")
     local status
     if not m.delivered then
         status = "Waiting to send"
@@ -570,16 +570,17 @@ local function FillDecide(row, e)
     end
     row:EnableMouse(true)
     row.id, row.target, row.fullReason = it.id, it.target, it.reason or ""
-    row.name:SetText(ns.Show(it.target))
+    row.name:SetText(ns.Colored(it.target, it.class))
     local waiting = it.status == "new"
+    local by = ns.Colored(it.by, ns.MemberClass(it.by))
     if waiting then
-        row.from:SetText("from " .. ns.Show(it.by) .. ", " .. ns.Ago(it.at))
+        row.from:SetText(ns.InfoText(it.level, it.class) .. ", from " .. by .. ", " .. ns.Ago(it.at))
         row.reason:SetText(it.reason ~= "" and it.reason or "(no reason given)")
         row.reason:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
     else
         local what = it.status == "invited" and "Invited" or "Declined"
-        row.from:SetText("from " .. ns.Show(it.by))
-        row.reason:SetText(what .. " by " .. ns.Show(it.decidedBy) .. ", " .. ns.Ago(it.decidedAt))
+        row.from:SetText(ns.InfoText(it.level, it.class) .. ", from " .. by)
+        row.reason:SetText(what .. " by " .. ns.Colored(it.decidedBy, ns.MemberClass(it.decidedBy)) .. ", " .. ns.Ago(it.decidedAt))
         local c = it.status == "invited" and GOOD or GOLD
         row.reason:SetTextColor(c[1], c[2], c[3])
     end
@@ -713,15 +714,22 @@ function ns.LogEntries()
     if not g then
         return list
     end
-    for _, it in pairs(g.items) do
+    local function Add(at, it, actor, action, middle, tail)
         local who = ns.Show(it.target)
-        list[#list + 1] = { at = it.at or 0, item = it, text = ns.Show(it.by) .. " suggested " .. who }
+        list[#list + 1] = {
+            at = at or 0, item = it, actor = actor, action = action,
+            text = ns.Show(actor) .. " " .. middle .. " " .. who .. (tail or ""),
+            display = ns.Colored(actor, ns.MemberClass(actor)) .. " " .. middle .. " " .. ns.Colored(it.target, it.class) .. (tail or ""),
+        }
+    end
+    for _, it in pairs(g.items) do
+        Add(it.at, it, it.by, "suggested", "suggested")
         if it.decidedAt and it.decidedBy then
             local did = (it.status == "invited" and "invited") or (it.status == "declined" and "declined") or "decided on"
-            list[#list + 1] = { at = it.decidedAt, item = it, text = ns.Show(it.decidedBy) .. " " .. did .. " " .. who }
+            Add(it.decidedAt, it, it.decidedBy, did, did)
         end
         if it.removedAt and it.removedBy then
-            list[#list + 1] = { at = it.removedAt, item = it, text = ns.Show(it.removedBy) .. " removed " .. who .. " from the list" }
+            Add(it.removedAt, it, it.removedBy, "removed", "removed", " from the list")
         end
     end
     table.sort(list, function(a, b)
@@ -746,7 +754,7 @@ local function LogRow(list)
     row:SetScript("OnEnter", function(self)
         local it = self.item
         if it then
-            ShowTip(self, ns.Show(it.target), "Suggested by " .. ns.Show(it.by) .. ", " .. When(it.at),
+            ShowTip(self, ns.Show(it.target), ns.InfoText(it.level, it.class), "Suggested by " .. ns.Show(it.by) .. ", " .. When(it.at),
                 it.reason ~= "" and ("Reason: " .. it.reason) or "No reason given")
         end
     end)
@@ -757,14 +765,68 @@ end
 local function FillLog(row, e)
     row.item = e.item
     row.when:SetText(When(e.at))
-    row.text:SetText(e.text)
+    row.text:SetText(e.display or e.text)
 end
+
+-- The game's own dropdown menu button (nil where the game has none).
+-- generator(dropdown, root) fills the menu each time it opens. Same as
+-- FriendsCraft's.
+local function Dropdown(parent, width, generator)
+    if not MenuUtil then
+        return nil
+    end
+    local ok, dd = pcall(CreateFrame, "DropdownButton", nil, parent, "WowStyle1DropdownTemplate")
+    if not ok or not dd or type(rawget(dd, "SetupMenu")) ~= "function" then
+        if ok and dd then
+            dd:Hide()
+        end
+        return nil
+    end
+    dd:SetWidth(width)
+    local okSetup = pcall(dd.SetupMenu, dd, generator)
+    if not okSetup then
+        dd:Hide()
+        return nil
+    end
+    return dd
+end
+
+local ACTIONS = { "suggested", "invited", "declined", "removed" }
 
 local function BuildLogPage(parent)
     local p = CreateFrame("Frame", nil, parent)
     p:SetAllPoints()
+    p.who, p.action = nil, nil -- filters: nil = anyone / any action
+    p.actors = {}
+    local function Pick(field, value)
+        p[field] = value
+        p:Refresh()
+    end
+    p.whoDrop = Dropdown(p, 170, function(_, root)
+        root:CreateRadio("Anyone", function() return rawget(p, "who") == nil end, function() Pick("who", nil) end)
+        for _, name in ipairs(p.actors) do
+            root:CreateRadio(ns.Colored(name, ns.MemberClass(name)), function() return rawget(p, "who") == name end, function() Pick("who", name) end)
+        end
+    end)
+    p.actionDrop = Dropdown(p, 150, function(_, root)
+        root:CreateRadio("Any action", function() return rawget(p, "action") == nil end, function() Pick("action", nil) end)
+        for _, a in ipairs(ACTIONS) do
+            root:CreateRadio(a:sub(1, 1):upper() .. a:sub(2), function() return rawget(p, "action") == a end, function() Pick("action", a) end)
+        end
+    end)
+    local top = -4
+    local whoDrop, actionDrop = rawget(p, "whoDrop"), rawget(p, "actionDrop")
+    if whoDrop and actionDrop then
+        local whoLabel = Text(p, "GameFontNormalSmall", "Who:", GOLD)
+        whoLabel:SetPoint("TOPLEFT", 4, -9)
+        p.whoDrop:SetPoint("LEFT", whoLabel, "RIGHT", 6, 0)
+        local actionLabel = Text(p, "GameFontNormalSmall", "Action:", GOLD)
+        actionLabel:SetPoint("LEFT", p.whoDrop, "RIGHT", 16, 0)
+        p.actionDrop:SetPoint("LEFT", actionLabel, "RIGHT", 6, 0)
+        top = -36
+    end
     p.note = Text(p, "GameFontDisableSmall", "", DIM)
-    p.note:SetPoint("TOPLEFT", 4, -4)
+    p.note:SetPoint("TOPLEFT", 4, top)
     p.note:SetPoint("RIGHT", p, "RIGHT", -4, 0)
     p.list = List(p)
     p.list:SetPoint("TOPLEFT", p.note, "BOTTOMLEFT", 0, -8)
@@ -773,19 +835,36 @@ local function BuildLogPage(parent)
     p.list.FillRow = FillLog
 
     function p:Refresh()
-        local entries = {}
+        local entries, seen, actors, total = {}, {}, {}, 0
+        local who, action = rawget(p, "who"), rawget(p, "action")
         if ns.IMayInvite() then
             for _, e in ipairs(ns.LogEntries()) do
-                e.height = 20
-                entries[#entries + 1] = e
+                total = total + 1
+                if e.actor and not seen[e.actor] then
+                    seen[e.actor] = true
+                    actors[#actors + 1] = e.actor
+                end
+                if (not who or e.actor == who) and (not action or e.action == action) then
+                    e.height = 20
+                    entries[#entries + 1] = e
+                end
+            end
+        end
+        table.sort(actors)
+        p.actors = actors
+        for _, dd in ipairs({ rawget(p, "whoDrop"), rawget(p, "actionDrop") }) do
+            if dd and dd.GenerateMenu then
+                pcall(dd.GenerateMenu, dd)
             end
         end
         if not ns.IMayInvite() then
             p.note:SetText("Only members who can invite see the log.")
-        elseif #entries == 0 then
+        elseif total == 0 then
             p.note:SetText("Nothing logged yet.")
+        elseif #entries == 0 then
+            p.note:SetText("Nothing matches these filters.")
         else
-            p.note:SetText("Every suggestion and decision, newest first. Hover a line for the reason.")
+            p.note:SetText("Newest first. Hover a line for the reason.")
         end
         p.list:SetEntries(entries)
     end
