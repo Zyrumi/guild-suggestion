@@ -377,9 +377,10 @@ local function PlaceSecure(b)
     if not row or fighting or InCombatLockdown() then
         return
     end
-    -- Stay above the row: the guild window rises above other frames when
-    -- clicked, which would otherwise cover a button placed above it once.
-    local strata, level = row:GetFrameStrata() or "MEDIUM", math.min((row:GetFrameLevel() or 0) + 10, 10000)
+    -- One strata above the guild window's: inside its own strata the window
+    -- drew over the catcher whatever its frame level (seen in game), so the
+    -- catcher never got the click. It only exists while To decide is open.
+    local strata, level = "HIGH", math.min((row:GetFrameLevel() or 0) + 10, 10000)
     if b:GetFrameStrata() ~= strata then
         b:SetFrameStrata(strata)
     end
