@@ -92,34 +92,89 @@ local function HideTip()
 end
 
 -------------------------------------------------------------------------------
--- A simple list: rows of fixed heights, mouse wheel scrolls by one entry
+-- A list of rows (each entry has its own height). It scrolls by whole rows,
+-- only when they don't all fit, with the game's own slim scroll bar (arrows,
+-- track, thumb), the one the guild window's lists use. Same approach as
+-- FriendsCraft's NativeScrollBar: the bar is driven by row offsets.
 -------------------------------------------------------------------------------
+
+local BAR_W = 14
+
+local function NativeScrollBar(list)
+    if not (ScrollBarMixin and ScrollBarMixin.Event and ScrollBarMixin.Event.OnScroll) then
+        return nil
+    end
+    local ok, bar = pcall(CreateFrame, "EventFrame", nil, list, "MinimalScrollBar")
+    if not ok or not bar or type(bar.SetScrollPercentage) ~= "function" or type(bar.RegisterCallback) ~= "function" then
+        if ok and bar then
+            bar:Hide()
+        end
+        return nil
+    end
+    bar:SetPoint("TOPRIGHT", 0, 0)
+    bar:SetPoint("BOTTOMRIGHT", 0, 0)
+    bar.useProportionalThumb = true
+    bar:RegisterCallback(ScrollBarMixin.Event.OnScroll, function(_, pct)
+        if list.syncing or type(pct) ~= "number" then
+            return
+        end
+        list:SetOffset(math.floor(pct * list:MaxOffset() + 0.5))
+    end, list)
+    return bar
+end
 
 local function List(parent)
     local list = CreateFrame("Frame", nil, parent)
     list.rows = {}     -- built rows, reused
     list.entries = {}
     list.offset = 0
-    list.more = Text(list, "GameFontDisableSmall", "Scroll for more", DIM)
-    list.more:SetPoint("BOTTOMRIGHT", 0, -14)
+    list.bar = NativeScrollBar(list)
+    if not rawget(list, "bar") then
+        -- Where the game has no such bar: a plain hint instead.
+        list.more = Text(list, "GameFontDisableSmall", "Scroll for more", DIM)
+        list.more:SetPoint("BOTTOMRIGHT", 0, -14)
+    end
     list:EnableMouseWheel(true)
     list:SetScript("OnMouseWheel", function(self, delta)
-        local max = math.max(0, #self.entries - 1)
-        self.offset = math.min(max, math.max(0, self.offset - delta))
-        self:Layout()
+        self:SetOffset(self.offset - delta)
     end)
+
+    -- The first row that can be at the top with the rest still filling the
+    -- box: 0 when everything fits (then nothing scrolls).
+    function list:MaxOffset()
+        local height, sum = self:GetHeight() or 0, 0
+        for i = #self.entries, 1, -1 do
+            sum = sum + self.entries[i].height
+            if sum > height then
+                return i
+            end
+        end
+        return 0
+    end
+
+    function list:SetOffset(value)
+        value = math.max(0, math.min(self:MaxOffset(), value or 0))
+        if value ~= self.offset then
+            self.offset = value
+            self:Layout()
+        end
+    end
+
     function list:Layout()
         local y, height = 0, self:GetHeight()
+        local max = self:MaxOffset()
+        self.offset = math.min(self.offset, max)
+        local scrolls = max > 0
+        local bar, more = rawget(self, "bar"), rawget(self, "more")
+        local right = (scrolls and bar) and -(BAR_W + 4) or 0
         for _, row in ipairs(self.rows) do
             row:Hide()
         end
         local used = 0
-        local shownAll = true
         for i = self.offset + 1, #self.entries do
             local e = self.entries[i]
             local h = e.height
             if y + h > height and used > 0 then
-                shownAll = false
                 break
             end
             used = used + 1
@@ -130,7 +185,7 @@ local function List(parent)
             end
             row:ClearAllPoints()
             row:SetPoint("TOPLEFT", 0, -y)
-            row:SetPoint("RIGHT", 0, 0)
+            row:SetPoint("RIGHT", right, 0)
             row:SetHeight(h)
             -- One broken row must not blank the whole list; say what broke.
             local ok, err = pcall(self.FillRow, row, e)
@@ -141,11 +196,25 @@ local function List(parent)
             row:Show()
             y = y + h
         end
-        self.more:SetShown(not shownAll)
+        if bar then
+            bar:SetShown(scrolls)
+            if scrolls then
+                local total = 0
+                for _, e in ipairs(self.entries) do
+                    total = total + e.height
+                end
+                self.syncing = true
+                pcall(bar.SetPanExtentPercentage, bar, 1 / max)
+                pcall(bar.SetVisibleExtentPercentage, bar, math.min(1, (height or 0) / math.max(1, total)))
+                pcall(bar.SetScrollPercentage, bar, self.offset / max, true)
+                self.syncing = false
+            end
+        elseif more then
+            more:SetShown(self.offset < max)
+        end
     end
     function list:SetEntries(entries)
         self.entries = entries
-        self.offset = math.min(self.offset, math.max(0, #entries - 1))
         self:Layout()
     end
     list:SetScript("OnSizeChanged", function(self) self:Layout() end)
@@ -164,26 +233,22 @@ local MINE_STATUS = {
 
 local function MineRow(list)
     local row = CreateFrame("Frame", nil, list)
-    row.name = Text(row, "GameFontHighlight")
-    row.name:SetPoint("TOPLEFT", 2, -4)
+    row.remove = Button(row, "X", 24, function(self) ns.ForgetMine(self:GetParent().id) end)
+    row.remove:SetPoint("RIGHT", -2, 0)
     row.status = Text(row, "GameFontNormalSmall")
-    row.status:SetPoint("TOPRIGHT", -84, -5)
+    row.status:SetPoint("RIGHT", row.remove, "LEFT", -8, 0)
     row.status:SetJustifyH("RIGHT")
-    row.reason = Text(row, "GameFontHighlightSmall", "", DIM)
-    row.reason:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -3)
-    row.reason:SetPoint("RIGHT", -84, 0)
-    row.reason:SetWordWrap(false)
-    row.remove = Button(row, "Remove", 76, function(self) ns.ForgetMine(self:GetParent().id) end)
-    row.remove:SetPoint("TOPRIGHT", -4, -1)
+    row.name = Text(row, "GameFontHighlight")
+    row.name:SetPoint("LEFT", 2, 0)
+    row.name:SetPoint("RIGHT", row.status, "LEFT", -8, 0)
+    row.name:SetWordWrap(false)
     row.remove:SetScript("OnEnter", function(self)
         ShowTip(self, "Remove from your list", "Only removes it here. It stays with the members who can invite.")
     end)
     row.remove:SetScript("OnLeave", HideTip)
     row:EnableMouse(true)
     row:SetScript("OnEnter", function(self)
-        if self.fullReason and self.fullReason ~= "" then
-            ShowTip(self, ns.Show(self.target), self.fullReason)
-        end
+        ShowTip(self, ns.Show(self.target), (self.fullReason and self.fullReason ~= "") and self.fullReason or "(no reason given)")
     end)
     row:SetScript("OnLeave", HideTip)
     local line = row:CreateTexture(nil, "BACKGROUND")
@@ -207,7 +272,24 @@ local function FillMine(row, e)
     row.status:SetText(status .. "  " .. ns.Ago(m.at))
     local c = (m.status == "invited" and GOOD) or GOLD
     row.status:SetTextColor(c[1], c[2], c[3])
-    row.reason:SetText(m.reason ~= "" and m.reason or "(no reason given)")
+end
+
+local function ConfirmClearMine()
+    if not StaticPopup_Show or not StaticPopupDialogs then
+        ns.ClearMine()
+        return
+    end
+    StaticPopupDialogs.GUILDSUGGESTION_CLEAR = StaticPopupDialogs.GUILDSUGGESTION_CLEAR or {
+        text = "Clear your list of suggestions?\n\nOnes already sent stay with the members who can invite. Ones still waiting to send are cancelled.",
+        button1 = "Clear",
+        button2 = "Cancel",
+        OnAccept = function() ns.ClearMine() end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+    }
+    StaticPopup_Show("GUILDSUGGESTION_CLEAR")
 end
 
 local function BuildSuggestPage(parent)
@@ -280,12 +362,15 @@ local function BuildSuggestPage(parent)
 
     local mineLabel = Text(p, "GameFontNormal", "Your suggestions", GOLD)
     mineLabel:SetPoint("TOPLEFT", p.who, "BOTTOMLEFT", 0, -12)
+    p.clear = Button(p, "Clear list", 90, ConfirmClearMine)
+    p.clear:SetPoint("RIGHT", p, "RIGHT", -4, 0)
+    p.clear:SetPoint("BOTTOM", mineLabel, "BOTTOM", 0, -3)
     p.empty = Text(p, "GameFontDisableSmall", "Nothing yet.", DIM)
     p.empty:SetPoint("TOPLEFT", mineLabel, "BOTTOMLEFT", 0, -6)
 
     p.list = List(p)
-    p.list:SetPoint("TOPLEFT", mineLabel, "BOTTOMLEFT", 0, -4)
-    p.list:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -4, 18)
+    p.list:SetPoint("TOPLEFT", mineLabel, "BOTTOMLEFT", 0, -8)
+    p.list:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -4, 4)
     p.list.MakeRow = MineRow
     p.list.FillRow = FillMine
 
@@ -294,11 +379,12 @@ local function BuildSuggestPage(parent)
         local entries = {}
         if g then
             for _, m in pairs(g.mine) do
-                entries[#entries + 1] = { height = 38, mine = m }
+                entries[#entries + 1] = { height = 26, mine = m }
             end
             table.sort(entries, function(a, b) return (a.mine.at or 0) > (b.mine.at or 0) end)
         end
         p.empty:SetShown(#entries == 0)
+        p.clear:SetShown(#entries > 0)
         p.list:SetEntries(entries)
         if not g then
             p.who:SetText("You are not in a guild.")
@@ -511,7 +597,7 @@ local function BuildDecidePage(parent)
     p.note:SetWordWrap(true)
     p.list = List(p)
     p.list:SetPoint("TOPLEFT", p.note, "BOTTOMLEFT", 0, -8)
-    p.list:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -4, 40)
+    p.list:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -4, 34)
     p.list.MakeRow = DecideRow
     p.list.FillRow = FillDecide
 
@@ -682,7 +768,7 @@ local function BuildLogPage(parent)
     p.note:SetPoint("RIGHT", p, "RIGHT", -4, 0)
     p.list = List(p)
     p.list:SetPoint("TOPLEFT", p.note, "BOTTOMLEFT", 0, -8)
-    p.list:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -4, 18)
+    p.list:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -4, 4)
     p.list.MakeRow = LogRow
     p.list.FillRow = FillLog
 

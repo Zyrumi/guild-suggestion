@@ -325,6 +325,15 @@ function ns.Decide(id, status)
     Refresh()
 end
 
+-- Your whole list (only on your side; ones not sent yet are cancelled).
+function ns.ClearMine()
+    local g = ns.Guild()
+    if g then
+        g.mine = {}
+        Refresh()
+    end
+end
+
 -- Your own suggestion off your own list (only on your side).
 function ns.ForgetMine(id)
     local g = ns.Guild()
