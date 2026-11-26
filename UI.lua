@@ -420,6 +420,19 @@ function ns.DebugInvite()
     if secureProblem then
         ns.Print("debug: last problem: " .. secureProblem)
     end
+    -- Paint the click catchers red (until /reload) so you can see where they are.
+    for i, b in ipairs(secureButtons) do
+        if not rawget(b, "debugPaint") then
+            local t = b:CreateTexture(nil, "OVERLAY")
+            t:SetAllPoints()
+            t:SetColorTexture(1, 0, 0, 0.6)
+            b.debugPaint = t
+        end
+        ns.Print(string.format("debug %d: mouse %s, size %.0fx%.0f | screen left %s bottom %s scale %.3f, button scale %.3f, row scale %.3f",
+            i, tostring(b:IsMouseEnabled()), b:GetWidth() or 0, b:GetHeight() or 0,
+            R(UIParent:GetLeft()), R(UIParent:GetBottom()), UIParent:GetEffectiveScale() or 0,
+            b:GetEffectiveScale() or 0, rawget(b, "row") and rawget(b, "row"):GetEffectiveScale() or 0))
+    end
 end
 
 function ns.FollowSecure()
