@@ -356,6 +356,7 @@ end
 -- button stands in and says to wait.
 local secureButtons = {}
 local fighting = false -- from the moment a fight starts until it ends
+local secureProblem      -- why the last Invite button couldn't be set up (shown on the stand-in)
 
 local function HideSecure()
     if InCombatLockdown() then
@@ -376,6 +377,15 @@ local function PlaceSecure(b)
     if not row or fighting or InCombatLockdown() then
         return
     end
+    -- Stay above the row: the guild window rises above other frames when
+    -- clicked, which would otherwise cover a button placed above it once.
+    local strata, level = row:GetFrameStrata() or "MEDIUM", math.min((row:GetFrameLevel() or 0) + 10, 10000)
+    if b:GetFrameStrata() ~= strata then
+        b:SetFrameStrata(strata)
+    end
+    if b:GetFrameLevel() ~= level then
+        b:SetFrameLevel(level)
+    end
     local right, top = row:GetRight(), row:GetTop()
     if not right or not top then
         return -- not laid out yet; the next update places it
@@ -390,6 +400,25 @@ local function PlaceSecure(b)
     b:ClearAllPoints()
     b:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", x, y)
     b.placed = { x, y, scale }
+end
+
+-- /gsuggest debug: where each Invite button is and what covers it.
+function ns.DebugInvite()
+    if #secureButtons == 0 then
+        ns.Print("debug: no Invite buttons made yet. " .. (secureProblem and ("Last problem: " .. secureProblem) or ""))
+    end
+    local function R(v) return v and string.format("%.0f", v) or "-" end
+    for i, b in ipairs(secureButtons) do
+        local row = rawget(b, "row")
+        ns.Print(string.format("debug %d: shown %s visible %s, %s %d, at %s,%s scale %.2f, alpha %.2f | row %s %s %d, right %s top %s",
+            i, tostring(b:IsShown()), tostring(b:IsVisible()), b:GetFrameStrata(), b:GetFrameLevel(),
+            R(b:GetLeft()), R(b:GetTop()), b:GetScale() or 0, b:GetEffectiveAlpha() or 0,
+            row and "yes" or "none", row and row:GetFrameStrata() or "-", row and row:GetFrameLevel() or 0,
+            R(row and row:GetRight()), R(row and row:GetTop())))
+    end
+    if secureProblem then
+        ns.Print("debug: last problem: " .. secureProblem)
+    end
 end
 
 function ns.FollowSecure()
@@ -411,6 +440,7 @@ local function SecureFor(row)
     local ok, b = pcall(CreateFrame, "Button", "GuildSuggestionInvite" .. (#secureButtons + 1), UIParent,
         "SecureActionButtonTemplate, UIPanelButtonTemplate")
     if not ok or not b then
+        secureProblem = "could not create it: " .. tostring(b)
         return nil
     end
     b:SetSize(76, 22)
@@ -447,9 +477,18 @@ local function DecideRow(list)
     row.reason:SetPoint("RIGHT", -4, 0)
     row.reason:SetWordWrap(true)
     row.reason:SetMaxLines(2)
-    -- Stand-in while a fight is on (see SecureFor).
-    row.invite = Button(row, "Invite", 76, function()
-        ns.Print("guild invites can be sent again when the fight is over.")
+    -- Stand-in while a fight is on (see SecureFor). Clicked outside a fight,
+    -- it says why the real button is missing and tries to set it up again.
+    row.invite = Button(row, "Invite", 76, function(self)
+        if InCombatLockdown() then
+            ns.Print("guild invites can be sent again when the fight is over.")
+            return
+        end
+        local target = self:GetParent().target
+        ns.Print("the Invite button wasn't ready (" .. (secureProblem or (fighting and "a fight seemed to be on" or "unknown"))
+            .. "). Trying again; meanwhile you can type /ginvite " .. tostring(target))
+        fighting = false
+        ns.RefreshUI()
     end)
     row.invite:SetPoint("TOPRIGHT", -84, -1)
     row.decline = Button(row, "Decline", 76, function(self)
@@ -512,14 +551,23 @@ local function FillDecide(row, e)
     row.decline:SetShown(waiting)
     row.remove:SetShown(not waiting)
     local secure = waiting and SecureFor(row)
+    local ready = false
     if secure then
-        secure.id, secure.target = it.id, it.target
-        secure:SetAttribute("macrotext", "/ginvite " .. it.target)
-        secure.row, secure.placed = row, nil
-        PlaceSecure(secure)
-        secure:SetFrameStrata(row:GetFrameStrata() or "MEDIUM")
-        secure:SetFrameLevel((row:GetFrameLevel() or 0) + 10)
-        secure:Show()
+        local ok, err = pcall(function()
+            secure.id, secure.target = it.id, it.target
+            secure:SetAttribute("macrotext", "/ginvite " .. it.target)
+            secure.row, secure.placed = row, nil
+            secure:Show()
+            PlaceSecure(secure)
+        end)
+        if ok then
+            ready = true
+            secureProblem = nil
+        else
+            secureProblem = tostring(err)
+        end
+    end
+    if ready then
         row.invite:Hide()
     else
         row.invite:SetShown(waiting)

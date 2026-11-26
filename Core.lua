@@ -391,6 +391,10 @@ SlashCmdList.GUILDSUGGESTION = function(input)
             return
         end
     end
+    if text:lower() == "debug" then
+        if ns.DebugInvite then ns.DebugInvite() end
+        return
+    end
     if text:lower() == "help" then
         ns.Print("/gsuggest opens Guild suggestions in the guild window. /gsuggest First Surname or /gsuggest %t fills in a name.")
     elseif text ~= "" then
