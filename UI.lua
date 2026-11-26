@@ -349,7 +349,7 @@ end
 -- What works (confirmed in game): Blizzard's own "Invite Member" button
 -- (bottom of the guild Chat page) opens the Add Guild Member box, and the
 -- player pastes the name there themselves. So Invite shows the name selected
--- in a box (Ctrl+C) and highlights Invite Member; Ctrl+V, Accept. Your own
+-- in a box to copy and highlights Invite Member; paste, Accept. Your own
 -- copy and paste count as typing. Comm.lua marks the suggestion once the
 -- game confirms.
 local glow
@@ -435,8 +435,8 @@ local function DecideRow(list)
     row.invite:SetScript("OnEnter", function(self)
         local g = ns.Guild()
         local it = g and g.items[self:GetParent().id]
-        ShowTip(self, "Invite", "Shows " .. (it and ns.Show(it.target) or "the name") .. " ready to copy. Ctrl+C, click Invite Member,"
-            .. " Ctrl+V, Accept. WoW only lets its own window send guild invites.")
+        ShowTip(self, "Invite", "Shows " .. (it and ns.Show(it.target) or "the name") .. " ready to copy. Copy it, click Invite Member,"
+            .. " paste, Accept. WoW only lets its own window send guild invites.")
     end)
     row.invite:SetScript("OnLeave", HideTip)
     row.invite:SetPoint("TOPRIGHT", -84, -1)
@@ -515,8 +515,9 @@ local function BuildDecidePage(parent)
     p.list.MakeRow = DecideRow
     p.list.FillRow = FillDecide
 
-    -- After Invite: the name, selected, for you to copy (Ctrl+C) and paste
-    -- (Ctrl+V) into Blizzard's Add Guild Member box. The addon may not copy
+    -- After Invite: the name, selected, for you to copy and paste into
+    -- Blizzard's Add Guild Member box (wording without key names, so it fits
+    -- any keyboard layout). The addon may not copy
     -- for you (the game blocks it), but your own copy and paste are fine.
     local strip = CreateFrame("Frame", nil, p)
     strip:SetPoint("BOTTOMLEFT", 4, 4)
