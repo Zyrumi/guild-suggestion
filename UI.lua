@@ -529,9 +529,13 @@ local function BuildDecidePage(parent)
     label:SetPoint("LEFT", 0, 0)
     local box = Input(strip, 220, "")
     box:SetPoint("LEFT", label, "RIGHT", 10, 0)
+    local close = CreateFrame("Button", nil, strip, "UIPanelCloseButton")
+    close:SetSize(22, 22)
+    close:SetPoint("RIGHT", 0, 0)
+    close:SetScript("OnClick", function() p.HideCopy() end)
     local hint = Text(strip, "GameFontHighlightSmall", "Ctrl+C, click Invite Member, Ctrl+V, Accept.", WHITE)
     hint:SetPoint("LEFT", box, "RIGHT", 10, 0)
-    hint:SetPoint("RIGHT", strip, "RIGHT", 0, 0)
+    hint:SetPoint("RIGHT", close, "LEFT", -4, 0)
     hint:SetWordWrap(false)
     -- Read-only: any edit snaps back to the name, kept selected.
     box:SetScript("OnTextChanged", function(self, userInput)
@@ -552,6 +556,7 @@ local function BuildDecidePage(parent)
     end
     function p.HideCopy()
         strip:Hide()
+        strip.name = nil
         box:ClearFocus()
     end
 
@@ -724,6 +729,9 @@ local function ShowPage(i)
     if i ~= 1 and not ns.IMayInvite() then
         i = 1
     end
+    if i ~= currentPage and pages[2] and pages[2].HideCopy then
+        pages[2].HideCopy()
+    end
     currentPage = i
     for n, page in ipairs(pages) do
         page:SetShown(n == i)
@@ -869,6 +877,9 @@ local function SetBlizzardTabsChecked(cf, checked)
 end
 
 local function HidePanel()
+    if pages[2] and pages[2].HideCopy then
+        pages[2].HideCopy()
+    end
     if panel and panel:IsShown() then
         panel:Hide()
     end
