@@ -109,9 +109,6 @@ local function List(parent)
         self:Layout()
     end)
     function list:Layout()
-        if self.BeforeLayout then
-            self.BeforeLayout()
-        end
         local y, height = 0, self:GetHeight()
         for _, row in ipairs(self.rows) do
             row:Hide()
@@ -347,146 +344,23 @@ local function ConfirmDecline(it)
     StaticPopup_Show("GUILDSUGGESTION_DECLINE", text, nil, it.id)
 end
 
--- Invite: Forever only lets its own UI send guild invites, so an addon can't
--- call the invite itself. Instead the Invite button is a secure button that
--- runs "/ginvite First Surname" as a macro when you click it, exactly as if
--- you had typed it. Secure buttons can't be moved, shown or hidden during a
--- fight, so they sit on UIParent (outside the guild window) and are hidden
--- and set loose as a fight starts; until it ends, the row's plain Invite
--- button stands in and says to wait.
-local secureButtons = {}
-local fighting = false -- from the moment a fight starts until it ends
-local secureProblem      -- why the last Invite button couldn't be set up (shown on the stand-in)
-
-local function HideSecure()
-    if InCombatLockdown() then
-        return
+-- Invite: Forever only lets Blizzard's own UI send guild invites. An addon
+-- can't, not even through a secure macro button (both tried in game: the
+-- first is "blocked from an action only available to the Blizzard UI", the
+-- second "a macro script has been blocked"). So Invite puts the player's
+-- name in chat as a link: right-click it and pick Guild Invite from the
+-- game's own menu, or type /ginvite. The addon then sees the game's "You
+-- have invited ..." line and marks the suggestion (Comm.lua).
+local function InviteHelp(it)
+    local name = it.target
+    local link
+    if GetPlayerLink then
+        local ok, l = pcall(GetPlayerLink, name, "[" .. ns.Show(name) .. "]")
+        link = ok and l or nil
     end
-    for _, b in ipairs(secureButtons) do
-        b:Hide()
-        b:ClearAllPoints()
-        b:SetAttribute("macrotext", nil) -- a stray catcher can never send an old invite
-        b.id, b.row, b.placed = nil, nil, nil
-    end
-end
-
--- Secure frames may only be anchored to the screen (UIParent), not to our
--- rows, so each button is put at its row's place on screen, at the row's
--- scale, and follows it while the page is open (see the panel's OnUpdate).
-local function PlaceSecure(b)
-    local row = rawget(b, "row")
-    if not row or fighting or InCombatLockdown() then
-        return
-    end
-    -- One strata above the guild window's: inside its own strata the window
-    -- drew over the catcher whatever its frame level (seen in game), so the
-    -- catcher never got the click. It only exists while To decide is open.
-    local strata, level = "HIGH", math.min((row:GetFrameLevel() or 0) + 10, 10000)
-    if b:GetFrameStrata() ~= strata then
-        b:SetFrameStrata(strata)
-    end
-    if b:GetFrameLevel() ~= level then
-        b:SetFrameLevel(level)
-    end
-    local face = row.invite
-    local right, top = face:GetRight(), face:GetTop()
-    if not right or not top then
-        return -- not laid out yet; the next update places it
-    end
-    local scale = (face:GetEffectiveScale() or 1) / (UIParent:GetEffectiveScale() or 1)
-    local x, y = right, top
-    local placed = rawget(b, "placed")
-    if placed and placed[1] == x and placed[2] == y and placed[3] == scale then
-        return
-    end
-    b:SetScale(scale)
-    b:ClearAllPoints()
-    b:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", x, y)
-    b.placed = { x, y, scale }
-end
-
--- /gsuggest debug: where each Invite button is and what covers it.
-function ns.DebugInvite()
-    if #secureButtons == 0 then
-        ns.Print("debug: no Invite buttons made yet. " .. (secureProblem and ("Last problem: " .. secureProblem) or ""))
-    end
-    local function R(v) return v and string.format("%.0f", v) or "-" end
-    for i, b in ipairs(secureButtons) do
-        local row = rawget(b, "row")
-        ns.Print(string.format("debug %d: shown %s visible %s, %s %d, at %s,%s scale %.2f, alpha %.2f | row %s %s %d, right %s top %s",
-            i, tostring(b:IsShown()), tostring(b:IsVisible()), b:GetFrameStrata(), b:GetFrameLevel(),
-            R(b:GetLeft()), R(b:GetTop()), b:GetScale() or 0, b:GetEffectiveAlpha() or 0,
-            row and "yes" or "none", row and row:GetFrameStrata() or "-", row and row:GetFrameLevel() or 0,
-            R(row and row:GetRight()), R(row and row:GetTop())))
-    end
-    if secureProblem then
-        ns.Print("debug: last problem: " .. secureProblem)
-    end
-    -- Paint the click catchers red (until /reload) so you can see where they are.
-    for i, b in ipairs(secureButtons) do
-        if not rawget(b, "debugPaint") then
-            local t = b:CreateTexture(nil, "OVERLAY")
-            t:SetAllPoints()
-            t:SetColorTexture(1, 0, 0, 0.6)
-            b.debugPaint = t
-        end
-        ns.Print(string.format("debug %d: mouse %s, size %.0fx%.0f | screen left %s bottom %s scale %.3f, button scale %.3f, row scale %.3f",
-            i, tostring(b:IsMouseEnabled()), b:GetWidth() or 0, b:GetHeight() or 0,
-            R(UIParent:GetLeft()), R(UIParent:GetBottom()), UIParent:GetEffectiveScale() or 0,
-            b:GetEffectiveScale() or 0, rawget(b, "row") and rawget(b, "row"):GetEffectiveScale() or 0))
-    end
-end
-
-function ns.FollowSecure()
-    for _, b in ipairs(secureButtons) do
-        if b:IsShown() then
-            PlaceSecure(b)
-        end
-    end
-end
-
-local function SecureFor(row)
-    if fighting or InCombatLockdown() then
-        return nil
-    end
-    local have = rawget(row, "secure")
-    if have then
-        return have
-    end
-    -- An invisible click catcher laid over the row's own Invite button,
-    -- which stays the visible face (lit up while the mouse is over it).
-    local ok, b = pcall(CreateFrame, "Button", "GuildSuggestionInvite" .. (#secureButtons + 1), UIParent,
-        "SecureActionButtonTemplate")
-    if not ok or not b then
-        secureProblem = "could not create it: " .. tostring(b)
-        return nil
-    end
-    b:SetSize(76, 22)
-    local face = row.invite
-    b:HookScript("OnMouseDown", function() face:SetButtonState("PUSHED") end)
-    b:HookScript("OnMouseUp", function() face:SetButtonState("NORMAL") end)
-    -- Both halves of a click: the game acts on the press or the release
-    -- depending on the "cast on key down" setting.
-    b:RegisterForClicks("AnyUp", "AnyDown")
-    b:SetAttribute("type", "macro")
-    b:HookScript("PostClick", function(self)
-        if self.id then
-            ns.WatchInvite(self.id)
-        end
-    end)
-    b:SetScript("OnEnter", function(self)
-        face:LockHighlight()
-        ShowTip(self, "Invite", "Sends " .. ns.Show(self.target) .. " a guild invite, like typing /ginvite. They need to be online.")
-    end)
-    b:SetScript("OnLeave", function()
-        face:UnlockHighlight()
-        face:SetButtonState("NORMAL")
-        HideTip()
-    end)
-    b:Hide()
-    secureButtons[#secureButtons + 1] = b
-    row.secure = b
-    return b
+    link = link or ("|Hplayer:" .. name .. "|h[" .. ns.Show(name) .. "]|h")
+    ns.Print("to invite " .. link .. ", right-click the name and pick Guild Invite, or type /ginvite " .. name
+        .. ". They need to be online. The suggestion is marked invited once the game confirms it.")
 end
 
 local function DecideRow(list)
@@ -502,21 +376,18 @@ local function DecideRow(list)
     row.reason:SetPoint("RIGHT", -4, 0)
     row.reason:SetWordWrap(true)
     row.reason:SetMaxLines(2)
-    -- The visible Invite button. Its clicks normally land on the secure
-    -- catcher on top (see SecureFor); a click that reaches it means the
-    -- catcher isn't there: during a fight, or it couldn't be set up (then it
-    -- says why and tries again).
+    -- See InviteHelp: the game's own UI has to send the invite.
     row.invite = Button(row, "Invite", 76, function(self)
-        if InCombatLockdown() then
-            ns.Print("guild invites can be sent again when the fight is over.")
-            return
+        local g = ns.Guild()
+        local it = g and g.items[self:GetParent().id]
+        if it then
+            InviteHelp(it)
         end
-        local target = self:GetParent().target
-        ns.Print("the Invite button wasn't ready (" .. (secureProblem or (fighting and "a fight seemed to be on" or "unknown"))
-            .. "). Trying again; meanwhile you can type /ginvite " .. tostring(target))
-        fighting = false
-        ns.RefreshUI()
     end)
+    row.invite:SetScript("OnEnter", function(self)
+        ShowTip(self, "Invite", "Puts the name in chat as a link. Right-click it and pick Guild Invite (or type /ginvite).")
+    end)
+    row.invite:SetScript("OnLeave", HideTip)
     row.invite:SetPoint("TOPRIGHT", -84, -1)
     row.decline = Button(row, "Decline", 76, function(self)
         local g = ns.Guild()
@@ -575,33 +446,9 @@ local function FillDecide(row, e)
         local c = it.status == "invited" and GOOD or GOLD
         row.reason:SetTextColor(c[1], c[2], c[3])
     end
+    row.invite:SetShown(waiting)
     row.decline:SetShown(waiting)
     row.remove:SetShown(not waiting)
-    local old = rawget(row, "secure")
-    if old and not waiting and not InCombatLockdown() then
-        old:Hide()
-        old:SetAttribute("macrotext", nil)
-    end
-    local secure = waiting and SecureFor(row)
-    local ready = false
-    if secure then
-        local ok, err = pcall(function()
-            secure.id, secure.target = it.id, it.target
-            secure:SetAttribute("macrotext", "/ginvite " .. it.target)
-            secure.row, secure.placed = row, nil
-            secure:Show()
-            PlaceSecure(secure)
-        end)
-        if ok then
-            ready = true
-            secureProblem = nil
-        else
-            secureProblem = tostring(err)
-        end
-    end
-    -- The row's Invite button is always the visible one; when the secure
-    -- catcher is ready it lies on top and takes the click.
-    row.invite:SetShown(waiting)
 end
 
 local function BuildDecidePage(parent)
@@ -616,7 +463,6 @@ local function BuildDecidePage(parent)
     p.list:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -4, 18)
     p.list.MakeRow = DecideRow
     p.list.FillRow = FillDecide
-    p.list.BeforeLayout = HideSecure
 
     function p:Refresh()
         local g = ns.Guild()
@@ -778,9 +624,6 @@ local function ShowPage(i)
         i = 1
     end
     currentPage = i
-    if i ~= 2 then
-        HideSecure()
-    end
     for n, page in ipairs(pages) do
         page:SetShown(n == i)
     end
@@ -924,7 +767,6 @@ local function SetBlizzardTabsChecked(cf, checked)
 end
 
 local function HidePanel()
-    HideSecure()
     if panel and panel:IsShown() then
         panel:Hide()
     end
@@ -1008,15 +850,6 @@ local function BuildPanel(cf)
     pages[2] = BuildDecidePage(content)
     pages[3] = BuildLogPage(content)
     panel:SetScript("OnShow", ns.Safe(function() ShowPage(currentPage) end, "guild tab"))
-    -- Keep the Invite buttons on their rows if the window moves.
-    local since = 0
-    panel:SetScript("OnUpdate", function(_, elapsed)
-        since = since + elapsed
-        if since > 0.1 then
-            since = 0
-            ns.FollowSecure()
-        end
-    end)
 end
 
 local function MakeTab(cf)
@@ -1168,15 +1001,6 @@ ns.On("IS_READY", function()
     end
 end)
 ns.On("IS_ROSTER", function() ns.RefreshBadge() end)
-ns.On("PLAYER_REGEN_DISABLED", function()
-    fighting = true
-    HideSecure()
-    ns.RefreshUI()
-end)
-ns.On("PLAYER_REGEN_ENABLED", function()
-    fighting = false
-    ns.RefreshUI()
-end)
 
 function ns.RefreshUI()
     ns.RefreshBadge()

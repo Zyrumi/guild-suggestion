@@ -335,10 +335,10 @@ function ns.ForgetMine(id)
 end
 
 -------------------------------------------------------------------------------
--- Inviting from the list: the game's answer decides what we mark
+-- Inviting: the game's own UI sends the invite (see InviteHelp in UI.lua);
+-- its "You have invited X to join your guild." line marks the waiting
+-- suggestion for X as invited, by you, however the invite was sent.
 -------------------------------------------------------------------------------
-
-local pendingInvite -- { id, first, at }
 
 local function FormatPattern(fmt)
     if type(fmt) ~= "string" then
@@ -348,65 +348,38 @@ local function FormatPattern(fmt)
     return "^" .. p:gsub("%%%%s", "(.+)") .. "$"
 end
 
--- Called right after the Invite button ran "/ginvite Name" (the game only
--- lets its own UI send guild invites, so the button runs that command; see
--- UI.lua). Watches the game's answer in chat to know whether it went out.
-function ns.WatchInvite(id)
+-- The waiting suggestion a name from a game message points at: the same
+-- full name, or the only waiting one with that first name.
+local function WaitingFor(raw)
     local g = ns.Guild()
-    local it = g and g.items[id]
-    if not it then
-        return
+    if not g or type(raw) ~= "string" then
+        return nil
     end
-    -- One click can reach us twice (press and release).
-    if pendingInvite and pendingInvite.id == id and GetTime() - pendingInvite.at < 1 then
-        return
-    end
-    pendingInvite = { id = id, first = ns.FirstName(it.target), at = GetTime(), name = it.target }
-    C_Timer.After(5, ns.Safe(function()
-        if pendingInvite and pendingInvite.id == id then
-            if pendingInvite.unreadable then
-                ns.Decide(id, "invited") -- the game's answer can't be read; trust the click
-            else
-                ns.Print("the game didn't confirm an invite to " .. ns.Show(it.target)
-                    .. ", so it stays on the To decide list.")
+    local full = ns.FullName((raw:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|H.-|h", ""):gsub("|h", "")))
+    local first = ns.FirstName(raw)
+    local byFirst, count = nil, 0
+    for _, it in pairs(g.items) do
+        if it.status == "new" then
+            if full and it.target == full then
+                return it
             end
-            pendingInvite = nil
+            if ns.FirstName(it.target) == first then
+                byFirst, count = it, count + 1
+            end
         end
-    end, "invite"))
-end
-
-local function SameFirst(captured)
-    return pendingInvite and ns.FirstName(captured) == pendingInvite.first
+    end
+    return count == 1 and byFirst or nil
 end
 
 ns.On("CHAT_MSG_SYSTEM", function(msg)
-    if not pendingInvite then
+    if type(msg) ~= "string" or ns.IsSecret(msg) or not IMayInvite() then
         return
     end
-    if type(msg) ~= "string" or ns.IsSecret(msg) then
-        pendingInvite.unreadable = true
-        return
-    end
-    local who = FormatPattern(ERR_GUILD_INVITE_S) and msg:match(FormatPattern(ERR_GUILD_INVITE_S))
-    if who and SameFirst(who) then
-        local id = pendingInvite.id
-        pendingInvite = nil
-        ns.Decide(id, "invited")
-        return
-    end
-    local checks = {
-        { ERR_GUILD_PLAYER_NOT_FOUND_S, " is not online, so the invite did not go out. Try again when they are." },
-        { ERR_ALREADY_IN_GUILD_S, " is already in a guild." },
-        { ERR_ALREADY_INVITED_TO_GUILD_S, " already has a guild invite waiting." },
-    }
-    for _, c in ipairs(checks) do
-        local p = FormatPattern(c[1])
-        local w = p and msg:match(p)
-        if w and SameFirst(w) then
-            ns.Print(ns.Show(pendingInvite.name) .. c[2])
-            pendingInvite = nil
-            return
-        end
+    local p = FormatPattern(ERR_GUILD_INVITE_S)
+    local who = p and msg:match(p)
+    local it = who and WaitingFor(who)
+    if it then
+        ns.Decide(it.id, "invited")
     end
 end)
 
