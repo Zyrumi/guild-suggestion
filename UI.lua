@@ -394,6 +394,9 @@ end
 
 local function InviteHelp(it)
     local name = it.target
+    if pages[2] and pages[2].ShowCopy then
+        pages[2].ShowCopy(name)
+    end
     local link
     if GetPlayerLink then
         local ok, l = pcall(GetPlayerLink, name, "[" .. ns.Show(name) .. "]")
@@ -404,9 +407,9 @@ local function InviteHelp(it)
     local button = cf and rawget(cf, "InviteButton")
     if button and button:IsShown() and button:IsEnabled() then
         PointAtInviteMember(button)
-        ns.Print("click Invite Member (bottom of the guild window), then Shift-click " .. link .. " and Accept.")
+        ns.Print("click Invite Member (bottom of the guild window), then Shift-click " .. link .. " (or paste the name from the box) and Accept.")
     else
-        ns.Print("open the guild Chat page (speech bubble tab), click Invite Member, then Shift-click " .. link .. " and Accept.")
+        ns.Print("open the guild Chat page (speech bubble tab), click Invite Member, then Shift-click " .. link .. " (or paste the name from the box) and Accept.")
     end
 end
 
@@ -510,13 +513,61 @@ local function BuildDecidePage(parent)
     p.note:SetWordWrap(true)
     p.list = List(p)
     p.list:SetPoint("TOPLEFT", p.note, "BOTTOMLEFT", 0, -8)
-    p.list:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -4, 18)
+    p.list:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -4, 40)
     p.list.MakeRow = DecideRow
     p.list.FillRow = FillDecide
+
+    -- After Invite: the name, selected, for you to copy (Ctrl+C) and paste
+    -- (Ctrl+V) into Blizzard's Add Guild Member box. The addon may not copy
+    -- for you (the game blocks it), but your own copy and paste are fine.
+    local strip = CreateFrame("Frame", nil, p)
+    strip:SetPoint("BOTTOMLEFT", 4, 4)
+    strip:SetPoint("BOTTOMRIGHT", -4, 4)
+    strip:SetHeight(26)
+    strip:Hide()
+    local label = Text(strip, "GameFontNormalSmall", "Name to paste:", GOLD)
+    label:SetPoint("LEFT", 0, 0)
+    local box = Input(strip, 220, "")
+    box:SetPoint("LEFT", label, "RIGHT", 10, 0)
+    local hint = Text(strip, "GameFontHighlightSmall", "Ctrl+C, click Invite Member, Ctrl+V, Accept.", WHITE)
+    hint:SetPoint("LEFT", box, "RIGHT", 10, 0)
+    hint:SetPoint("RIGHT", strip, "RIGHT", 0, 0)
+    hint:SetWordWrap(false)
+    -- Read-only: any edit snaps back to the name, kept selected.
+    box:SetScript("OnTextChanged", function(self, userInput)
+        if userInput and self:GetText() ~= strip.name then
+            self:SetText(strip.name or "")
+            self:HighlightText()
+        end
+        self:UpdateHint()
+    end)
+    box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+    box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    function p.ShowCopy(name)
+        strip.name = name
+        box:SetText(name)
+        strip:Show()
+        box:SetFocus()
+        box:HighlightText()
+    end
+    function p.HideCopy()
+        strip:Hide()
+        box:ClearFocus()
+    end
 
     function p:Refresh()
         local g = ns.Guild()
         local waiting, decided = {}, {}
+        -- The copy box goes away once its suggestion is no longer waiting.
+        local stillWaiting = false
+        for _, it in pairs(g and g.items or {}) do
+            if it.status == "new" and it.target == strip.name then
+                stillWaiting = true
+            end
+        end
+        if not stillWaiting then
+            p.HideCopy()
+        end
         if g and ns.IMayInvite() then
             for _, it in pairs(g.items) do
                 if it.status == "new" then
