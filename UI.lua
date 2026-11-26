@@ -365,6 +365,7 @@ local function HideSecure()
     for _, b in ipairs(secureButtons) do
         b:Hide()
         b:ClearAllPoints()
+        b:SetAttribute("macrotext", nil) -- a stray catcher can never send an old invite
         b.id, b.row, b.placed = nil, nil, nil
     end
 end
@@ -576,6 +577,11 @@ local function FillDecide(row, e)
     end
     row.decline:SetShown(waiting)
     row.remove:SetShown(not waiting)
+    local old = rawget(row, "secure")
+    if old and not waiting and not InCombatLockdown() then
+        old:Hide()
+        old:SetAttribute("macrotext", nil)
+    end
     local secure = waiting and SecureFor(row)
     local ready = false
     if secure then
