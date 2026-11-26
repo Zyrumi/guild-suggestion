@@ -386,12 +386,13 @@ local function PlaceSecure(b)
     if b:GetFrameLevel() ~= level then
         b:SetFrameLevel(level)
     end
-    local right, top = row:GetRight(), row:GetTop()
+    local face = row.invite
+    local right, top = face:GetRight(), face:GetTop()
     if not right or not top then
         return -- not laid out yet; the next update places it
     end
-    local scale = (row:GetEffectiveScale() or 1) / (UIParent:GetEffectiveScale() or 1)
-    local x, y = right - 84, top - 1
+    local scale = (face:GetEffectiveScale() or 1) / (UIParent:GetEffectiveScale() or 1)
+    local x, y = right, top
     local placed = rawget(b, "placed")
     if placed and placed[1] == x and placed[2] == y and placed[3] == scale then
         return
@@ -437,14 +438,18 @@ local function SecureFor(row)
     if have then
         return have
     end
+    -- An invisible click catcher laid over the row's own Invite button,
+    -- which stays the visible face (lit up while the mouse is over it).
     local ok, b = pcall(CreateFrame, "Button", "GuildSuggestionInvite" .. (#secureButtons + 1), UIParent,
-        "SecureActionButtonTemplate, UIPanelButtonTemplate")
+        "SecureActionButtonTemplate")
     if not ok or not b then
         secureProblem = "could not create it: " .. tostring(b)
         return nil
     end
     b:SetSize(76, 22)
-    b:SetText("Invite")
+    local face = row.invite
+    b:HookScript("OnMouseDown", function() face:SetButtonState("PUSHED") end)
+    b:HookScript("OnMouseUp", function() face:SetButtonState("NORMAL") end)
     -- Both halves of a click: the game acts on the press or the release
     -- depending on the "cast on key down" setting.
     b:RegisterForClicks("AnyUp", "AnyDown")
@@ -455,9 +460,14 @@ local function SecureFor(row)
         end
     end)
     b:SetScript("OnEnter", function(self)
+        face:LockHighlight()
         ShowTip(self, "Invite", "Sends " .. ns.Show(self.target) .. " a guild invite, like typing /ginvite. They need to be online.")
     end)
-    b:SetScript("OnLeave", HideTip)
+    b:SetScript("OnLeave", function()
+        face:UnlockHighlight()
+        face:SetButtonState("NORMAL")
+        HideTip()
+    end)
     b:Hide()
     secureButtons[#secureButtons + 1] = b
     row.secure = b
@@ -477,8 +487,10 @@ local function DecideRow(list)
     row.reason:SetPoint("RIGHT", -4, 0)
     row.reason:SetWordWrap(true)
     row.reason:SetMaxLines(2)
-    -- Stand-in while a fight is on (see SecureFor). Clicked outside a fight,
-    -- it says why the real button is missing and tries to set it up again.
+    -- The visible Invite button. Its clicks normally land on the secure
+    -- catcher on top (see SecureFor); a click that reaches it means the
+    -- catcher isn't there: during a fight, or it couldn't be set up (then it
+    -- says why and tries again).
     row.invite = Button(row, "Invite", 76, function(self)
         if InCombatLockdown() then
             ns.Print("guild invites can be sent again when the fight is over.")
@@ -567,11 +579,9 @@ local function FillDecide(row, e)
             secureProblem = tostring(err)
         end
     end
-    if ready then
-        row.invite:Hide()
-    else
-        row.invite:SetShown(waiting)
-    end
+    -- The row's Invite button is always the visible one; when the secure
+    -- catcher is ready it lies on top and takes the click.
+    row.invite:SetShown(waiting)
 end
 
 local function BuildDecidePage(parent)
