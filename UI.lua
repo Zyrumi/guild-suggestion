@@ -345,22 +345,15 @@ local function ConfirmDecline(it)
 end
 
 -- Invite: Forever only lets Blizzard's own UI send guild invites. An addon
--- can't, not even through a secure macro button (both tried in game: the
--- first is "blocked from an action only available to the Blizzard UI", the
--- second "a macro script has been blocked"). So Invite puts the player's
--- name in chat as a link: right-click it and pick Guild Invite from the
--- game's own menu, or type /ginvite. The addon then sees the game's "You
--- have invited ..." line and marks the suggestion (Comm.lua).
+-- can't, not even through a secure macro button (both tried in game: "blocked
+-- from an action only available to the Blizzard UI" and "a macro script has
+-- been blocked"), and Forever's right-click menu on a name has no Guild
+-- Invite (its "Invite" is a group invite). Typing /ginvite in chat is the
+-- game's own UI, so Invite says what to type. When the game answers "You
+-- have invited ...", the suggestion is marked invited (Comm.lua).
 local function InviteHelp(it)
-    local name = it.target
-    local link
-    if GetPlayerLink then
-        local ok, l = pcall(GetPlayerLink, name, "[" .. ns.Show(name) .. "]")
-        link = ok and l or nil
-    end
-    link = link or ("|Hplayer:" .. name .. "|h[" .. ns.Show(name) .. "]|h")
-    ns.Print("to invite " .. link .. ", right-click the name and pick Guild Invite, or type /ginvite " .. name
-        .. ". They need to be online. The suggestion is marked invited once the game confirms it.")
+    ns.Print("to invite " .. ns.Show(it.target) .. ", type in chat:  /ginvite " .. it.target
+        .. "   (WoW doesn't let addons send guild invites. Once the game confirms it, the suggestion is marked invited.)")
 end
 
 local function DecideRow(list)
@@ -385,7 +378,10 @@ local function DecideRow(list)
         end
     end)
     row.invite:SetScript("OnEnter", function(self)
-        ShowTip(self, "Invite", "Puts the name in chat as a link. Right-click it and pick Guild Invite (or type /ginvite).")
+        local g = ns.Guild()
+        local it = g and g.items[self:GetParent().id]
+        ShowTip(self, "Invite", "Shows the command to type in chat: /ginvite " .. (it and it.target or "Name")
+            .. ". WoW doesn't let addons send guild invites themselves.")
     end)
     row.invite:SetScript("OnLeave", HideTip)
     row.invite:SetPoint("TOPRIGHT", -84, -1)
