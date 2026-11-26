@@ -344,16 +344,70 @@ local function ConfirmDecline(it)
     StaticPopup_Show("GUILDSUGGESTION_DECLINE", text, nil, it.id)
 end
 
--- Invite: Forever only lets Blizzard's own UI send guild invites. An addon
--- can't, not even through a secure macro button (both tried in game: "blocked
--- from an action only available to the Blizzard UI" and "a macro script has
--- been blocked"), and Forever's right-click menu on a name has no Guild
--- Invite (its "Invite" is a group invite). Typing /ginvite in chat is the
--- game's own UI, so Invite says what to type. When the game answers "You
--- have invited ...", the suggestion is marked invited (Comm.lua).
+-- Invite: Forever only lets Blizzard's own UI send guild invites, and only
+-- with a name the player gave it: an addon can't invite, not even through a
+-- secure macro button, and a name the addon writes into a box or the chat
+-- line is marked as the addon's and blocked too (all tried in game).
+-- What works: Blizzard's own "Invite Member" button (bottom of the guild
+-- Chat page) opens the Add Guild Member box, and Shift-clicking a player
+-- link while that box is open makes Blizzard's code fill in the name
+-- (ItemRefHandlers: HandlePlayerLink), special characters and all. So
+-- Invite prints the name as a link and points at Invite Member; Shift-click,
+-- Accept. Comm.lua marks the suggestion once the game confirms.
+local glow
+
+local function PointAtInviteMember(button)
+    if not glow then
+        glow = CreateFrame("Frame", nil, UIParent)
+        glow:SetFrameStrata("HIGH")
+        local edges = {}
+        for i = 1, 4 do
+            edges[i] = glow:CreateTexture(nil, "OVERLAY")
+            edges[i]:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1)
+        end
+        edges[1]:SetPoint("TOPLEFT"); edges[1]:SetPoint("TOPRIGHT"); edges[1]:SetHeight(2)
+        edges[2]:SetPoint("BOTTOMLEFT"); edges[2]:SetPoint("BOTTOMRIGHT"); edges[2]:SetHeight(2)
+        edges[3]:SetPoint("TOPLEFT"); edges[3]:SetPoint("BOTTOMLEFT"); edges[3]:SetWidth(2)
+        edges[4]:SetPoint("TOPRIGHT"); edges[4]:SetPoint("BOTTOMRIGHT"); edges[4]:SetWidth(2)
+        local anim = glow:CreateAnimationGroup()
+        anim:SetLooping("BOUNCE")
+        local fade = anim:CreateAnimation("Alpha")
+        fade:SetFromAlpha(1)
+        fade:SetToAlpha(0.2)
+        fade:SetDuration(0.5)
+        glow.anim = anim
+    end
+    glow:ClearAllPoints()
+    glow:SetPoint("TOPLEFT", button, "TOPLEFT", -3, 3)
+    glow:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 3, -3)
+    glow:Show()
+    glow.anim:Play()
+    local shownAt = GetTime()
+    glow.shownAt = shownAt
+    C_Timer.After(10, function()
+        if glow.shownAt == shownAt then
+            glow.anim:Stop()
+            glow:Hide()
+        end
+    end)
+end
+
 local function InviteHelp(it)
-    ns.Print("to invite " .. ns.Show(it.target) .. ", type in chat:  /ginvite " .. it.target
-        .. "   (WoW doesn't let addons send guild invites. Once the game confirms it, the suggestion is marked invited.)")
+    local name = it.target
+    local link
+    if GetPlayerLink then
+        local ok, l = pcall(GetPlayerLink, name, "[" .. ns.Show(name) .. "]")
+        link = ok and l or nil
+    end
+    link = link or ("|Hplayer:" .. name .. "|h[" .. ns.Show(name) .. "]|h")
+    local cf = CommunitiesFrame
+    local button = cf and rawget(cf, "InviteButton")
+    if button and button:IsShown() and button:IsEnabled() then
+        PointAtInviteMember(button)
+        ns.Print("click Invite Member (bottom of the guild window), then Shift-click " .. link .. " and Accept.")
+    else
+        ns.Print("open the guild Chat page (speech bubble tab), click Invite Member, then Shift-click " .. link .. " and Accept.")
+    end
 end
 
 local function DecideRow(list)
@@ -380,8 +434,8 @@ local function DecideRow(list)
     row.invite:SetScript("OnEnter", function(self)
         local g = ns.Guild()
         local it = g and g.items[self:GetParent().id]
-        ShowTip(self, "Invite", "Shows the command to type in chat: /ginvite " .. (it and it.target or "Name")
-            .. ". WoW doesn't let addons send guild invites themselves.")
+        ShowTip(self, "Invite", "Puts " .. (it and ns.Show(it.target) or "the name") .. " in chat as a link. Click Invite Member,"
+            .. " Shift-click the name and Accept. WoW only lets its own window send guild invites.")
     end)
     row.invite:SetScript("OnLeave", HideTip)
     row.invite:SetPoint("TOPRIGHT", -84, -1)
@@ -695,10 +749,11 @@ local function RestoreChatBar()
     chatBarStrata = nil
 end
 
--- The roster page's buttons along the bottom edge (Invite Member, Guild
--- Control, Guild Log) sit outside the panel; they're faded out and made
+-- The guild window's buttons along the bottom edge (Guild Control, Guild
+-- Log) sit outside the panel; they're faded out and made
 -- unclickable while it's open, so the game stays in charge of showing them.
-local BOTTOM_BUTTONS = { "InviteButton", "CommunitiesControlFrame", "GuildLogButton" }
+-- Blizzard's Invite Member button stays usable: inviting goes through it.
+local BOTTOM_BUTTONS = { "CommunitiesControlFrame", "GuildLogButton" }
 local muted
 
 local function Mute(f)
