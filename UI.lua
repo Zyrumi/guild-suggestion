@@ -135,7 +135,12 @@ local function List(parent)
             row:SetPoint("TOPLEFT", 0, -y)
             row:SetPoint("RIGHT", 0, 0)
             row:SetHeight(h)
-            self.FillRow(row, e)
+            -- One broken row must not blank the whole list; say what broke.
+            local ok, err = pcall(self.FillRow, row, e)
+            if not ok and not self.reported then
+                self.reported = true
+                ns.Print("error showing the list: " .. tostring(err))
+            end
             row:Show()
             y = y + h
         end
@@ -359,7 +364,39 @@ local function HideSecure()
     for _, b in ipairs(secureButtons) do
         b:Hide()
         b:ClearAllPoints()
-        b.id = nil
+        b.id, b.row, b.placed = nil, nil, nil
+    end
+end
+
+-- Secure frames may only be anchored to the screen (UIParent), not to our
+-- rows, so each button is put at its row's place on screen, at the row's
+-- scale, and follows it while the page is open (see the panel's OnUpdate).
+local function PlaceSecure(b)
+    local row = rawget(b, "row")
+    if not row or fighting or InCombatLockdown() then
+        return
+    end
+    local right, top = row:GetRight(), row:GetTop()
+    if not right or not top then
+        return -- not laid out yet; the next update places it
+    end
+    local scale = (row:GetEffectiveScale() or 1) / (UIParent:GetEffectiveScale() or 1)
+    local x, y = right - 84, top - 1
+    local placed = rawget(b, "placed")
+    if placed and placed[1] == x and placed[2] == y and placed[3] == scale then
+        return
+    end
+    b:SetScale(scale)
+    b:ClearAllPoints()
+    b:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", x, y)
+    b.placed = { x, y, scale }
+end
+
+function ns.FollowSecure()
+    for _, b in ipairs(secureButtons) do
+        if b:IsShown() then
+            PlaceSecure(b)
+        end
     end
 end
 
@@ -478,8 +515,8 @@ local function FillDecide(row, e)
     if secure then
         secure.id, secure.target = it.id, it.target
         secure:SetAttribute("macrotext", "/ginvite " .. it.target)
-        secure:ClearAllPoints()
-        secure:SetPoint("TOPRIGHT", row, "TOPRIGHT", -84, -1)
+        secure.row, secure.placed = row, nil
+        PlaceSecure(secure)
         secure:SetFrameStrata(row:GetFrameStrata() or "MEDIUM")
         secure:SetFrameLevel((row:GetFrameLevel() or 0) + 10)
         secure:Show()
@@ -892,7 +929,16 @@ local function BuildPanel(cf)
     pages[1] = BuildSuggestPage(content)
     pages[2] = BuildDecidePage(content)
     pages[3] = BuildLogPage(content)
-    panel:SetScript("OnShow", function() ShowPage(currentPage) end)
+    panel:SetScript("OnShow", ns.Safe(function() ShowPage(currentPage) end, "guild tab"))
+    -- Keep the Invite buttons on their rows if the window moves.
+    local since = 0
+    panel:SetScript("OnUpdate", function(_, elapsed)
+        since = since + elapsed
+        if since > 0.1 then
+            since = 0
+            ns.FollowSecure()
+        end
+    end)
 end
 
 local function MakeTab(cf)
