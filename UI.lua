@@ -358,8 +358,9 @@ local glow
 
 local function PointAtInviteMember(button)
     if not glow then
-        glow = CreateFrame("Frame", nil, UIParent)
-        glow:SetFrameStrata("HIGH")
+        -- Part of the guild window, so it closes with it.
+        glow = CreateFrame("Frame", nil, CommunitiesFrame)
+        glow:SetFrameLevel(math.min((CommunitiesFrame:GetFrameLevel() or 0) + 3100, 9500))
         local edges = {}
         for i = 1, 4 do
             edges[i] = glow:CreateTexture(nil, "OVERLAY")
@@ -384,12 +385,20 @@ local function PointAtInviteMember(button)
     glow.anim:Play()
     local shownAt = GetTime()
     glow.shownAt = shownAt
-    C_Timer.After(10, function()
+    C_Timer.After(4, function()
         if glow.shownAt == shownAt then
             glow.anim:Stop()
             glow:Hide()
         end
     end)
+end
+
+function ns.StopGlow()
+    if glow then
+        glow.shownAt = nil
+        glow.anim:Stop()
+        glow:Hide()
+    end
 end
 
 local function InviteHelp(it)
@@ -877,6 +886,9 @@ local function SetBlizzardTabsChecked(cf, checked)
 end
 
 local function HidePanel()
+    if ns.StopGlow then
+        ns.StopGlow()
+    end
     if pages[2] and pages[2].HideCopy then
         pages[2].HideCopy()
     end
