@@ -233,7 +233,11 @@ local MINE_STATUS = {
 
 local function MineRow(list)
     local row = CreateFrame("Frame", nil, list)
-    row.remove = Button(row, "X", 24, function(self) ns.ForgetMine(self:GetParent().id) end)
+    row.remove = Button(row, "X", 24, function(self)
+        for _, m in ipairs(rawget(self:GetParent(), "group") or {}) do
+            ns.ForgetMine(m.id)
+        end
+    end)
     row.remove:SetPoint("RIGHT", -2, 0)
     row.status = Text(row, "GameFontNormalSmall")
     row.status:SetPoint("RIGHT", row.remove, "LEFT", -8, 0)
@@ -261,7 +265,14 @@ end
 
 local function FillMine(row, e)
     local m = e.mine
-    row.id, row.target, row.fullReason = m.id, m.target, m.reason
+    row.id, row.target, row.group = m.id, m.target, e.group or { m }
+    local reasons = {}
+    for _, s in ipairs(row.group) do
+        if s.reason and s.reason ~= "" then
+            reasons[#reasons + 1] = s.reason
+        end
+    end
+    row.fullReason = table.concat(reasons, string.char(10))
     row.name:SetText(ns.Colored(m.target, m.class) .. "  |cffa6a6a6" .. ns.InfoText(m.level, m.class) .. "|r")
     local status
     if m.joinedAt then
@@ -381,8 +392,19 @@ local function BuildSuggestPage(parent)
         local g = ns.Guild()
         local entries = {}
         if g then
+            -- One row per player: the latest suggestion shows, X removes all.
+            local byTarget = {}
             for _, m in pairs(g.mine) do
-                entries[#entries + 1] = { height = 26, mine = m }
+                local e = byTarget[m.target]
+                if not e then
+                    e = { height = 26, mine = m, group = {} }
+                    byTarget[m.target] = e
+                    entries[#entries + 1] = e
+                end
+                table.insert(e.group, m)
+                if (m.at or 0) > (e.mine.at or 0) then
+                    e.mine = m
+                end
             end
             table.sort(entries, function(a, b) return (a.mine.at or 0) > (b.mine.at or 0) end)
         end
@@ -603,7 +625,15 @@ local function FillDecide(row, e)
         latest = math.max(latest, s.at or 0)
     end
     row.reasons = #reasons > 0 and reasons or { "(no reason given)" }
-    local by = table.concat(byNames, ", ") .. (#byNames > 1 and (" (" .. #byNames .. ")") or "")
+    for _, s in ipairs(group) do
+        if s.level and not it.level then it = setmetatable({ level = s.level }, { __index = it }) end
+        if s.class and not it.class then it = setmetatable({ class = s.class }, { __index = it }) end
+    end
+    row.name:SetText(ns.Colored(it.target, it.class))
+    local by = byNames[1] .. (#byNames > 1 and (" +" .. (#byNames - 1) .. " more") or "")
+    if #byNames > 1 then
+        table.insert(row.reasons, 1, "Suggested by " .. table.concat(byNames, ", "))
+    end
     if waiting then
         local state = ns.OnlineState(it.target)
         local online = (state == "online" and "|cff4ee44eonline|r") or (state == "offline" and "|cff9d9d9doffline|r") or "checking"

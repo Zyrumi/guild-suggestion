@@ -293,6 +293,10 @@ function ns.Suggest(rawTarget, rawReason)
     end
     local reason = ns.Clean(rawReason, ns.MAX_REASON)
     local level, class = ns.LookupPlayer(target)
+    if not level or not class then
+        local kl, kc = ns.KnownInfo(g, target)
+        level, class = level or kl, class or kc
+    end
     local m = { id = ns.NewId(), target = target, reason = reason, by = ns.MyKey(), at = time(), status = "new",
         level = level, class = class }
     g.mine[m.id] = m
@@ -373,10 +377,36 @@ ns.On("UPDATE_MOUSEOVER_UNIT", function() Seen("mouseover") end)
 -- made and another (who can invite) decided is already in the shared list,
 -- so your own list takes the decision from there: the two characters are
 -- never online together to tell each other.
+-- The latest known level and class of a player, from any suggestion of
+-- them in your saved lists (suggestions of the same name are the same player).
+function ns.KnownInfo(g, target)
+    local level, class, levelAt = nil, nil, -1
+    for _, list in ipairs({ g.items, g.mine }) do
+        for _, it in pairs(list) do
+            if it.target == target then
+                if it.level and (it.at or 0) > levelAt then
+                    level, levelAt = it.level, it.at or 0
+                end
+                class = class or it.class
+            end
+        end
+    end
+    return level, class
+end
+
 function ns.SyncMine()
     local g = ns.GuildName() and ns.Guild()
     if not g then
         return
+    end
+    -- Fill in level and class known from another suggestion of the same name.
+    for _, list in ipairs({ g.items, g.mine }) do
+        for _, it in pairs(list) do
+            if it.target and (not it.level or not it.class) then
+                local kl, kc = ns.KnownInfo(g, it.target)
+                it.level, it.class = it.level or kl, it.class or kc
+            end
+        end
     end
     for id, m in pairs(g.mine) do
         local it = g.items[id]

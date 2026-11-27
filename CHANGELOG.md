@@ -5,3 +5,5 @@
 - A player who was declined before says so on the new suggestion ("Declined before, 12 days ago by ...").
 - When a suggested player joins the guild, the suggestion shows "Joined the guild" (also on the suggester's own list), and the Log records it. The Log's Action filter has "Joined".
 - Your suggestions show decisions made on your other characters (same account) right away.
+- A player suggested by name gets the level and class already known from another suggestion of them.
+- Your suggestions show one row per player too; its X removes all of them.
