@@ -264,13 +264,15 @@ local function FillMine(row, e)
     row.id, row.target, row.fullReason = m.id, m.target, m.reason
     row.name:SetText(ns.Colored(m.target, m.class) .. "  |cffa6a6a6" .. ns.InfoText(m.level, m.class) .. "|r")
     local status
-    if not m.delivered then
+    if m.joinedAt then
+        status = "Joined the guild"
+    elseif not m.delivered then
         status = "Waiting to send"
     else
         status = MINE_STATUS[m.status] or MINE_STATUS.new
     end
-    row.status:SetText(status .. "  " .. ns.Ago(m.at))
-    local c = (m.status == "invited" and GOOD) or GOLD
+    row.status:SetText(status .. "  " .. ns.Ago(m.joinedAt or m.at))
+    local c = ((m.joinedAt or m.status == "invited") and GOOD) or GOLD
     row.status:SetTextColor(c[1], c[2], c[3])
 end
 
@@ -404,17 +406,27 @@ end
 -- Page 2: To decide
 -------------------------------------------------------------------------------
 
-local function ConfirmDecline(it)
+-- group: every waiting suggestion for one player (they're decided together).
+local function ConfirmDecline(group)
+    local ids, names, seen = {}, {}, {}
+    for _, it in ipairs(group) do
+        ids[#ids + 1] = it.id
+        if not seen[it.by] then
+            seen[it.by] = true
+            names[#names + 1] = ns.Show(it.by)
+        end
+    end
+    local it = group[1]
     if not StaticPopup_Show or not StaticPopupDialogs then
-        ns.Decide(it.id, "declined")
+        for _, id in ipairs(ids) do ns.Decide(id, "declined") end
         return
     end
     StaticPopupDialogs.GUILDSUGGESTION_DECLINE = StaticPopupDialogs.GUILDSUGGESTION_DECLINE or {
         text = "%s",
         button1 = "Decline",
         button2 = "Cancel",
-        OnAccept = function(_, id)
-            if id then
+        OnAccept = function(_, list)
+            for _, id in ipairs(type(list) == "table" and list or {}) do
                 ns.Decide(id, "declined")
             end
         end,
@@ -423,9 +435,9 @@ local function ConfirmDecline(it)
         hideOnEscape = true,
         preferredIndex = 3,
     }
-    local text = "Decline " .. ns.Show(it.target) .. "?\n\n" .. ns.Show(it.by)
-        .. " will see that the suggestion was not accepted (not who declined it)."
-    StaticPopup_Show("GUILDSUGGESTION_DECLINE", text, nil, it.id)
+    local text = "Decline " .. ns.Show(it.target) .. "?\n\n" .. table.concat(names, ", ")
+        .. (#names == 1 and " will see" or " will each see") .. " that the suggestion was not accepted (not who declined it)."
+    StaticPopup_Show("GUILDSUGGESTION_DECLINE", text, nil, ids)
 end
 
 -- Invite: Forever only lets Blizzard's own UI send guild invites, and only
@@ -526,14 +538,17 @@ local function DecideRow(list)
     row.invite:SetScript("OnLeave", HideTip)
     row.invite:SetPoint("TOPRIGHT", -84, -1)
     row.decline = Button(row, "Decline", 76, function(self)
-        local g = ns.Guild()
-        local it = g and g.items[self:GetParent().id]
-        if it then
-            ConfirmDecline(it)
+        local group = rawget(self:GetParent(), "group")
+        if group and #group > 0 then
+            ConfirmDecline(group)
         end
     end)
     row.decline:SetPoint("TOPRIGHT", -4, -1)
-    row.remove = Button(row, "Remove", 76, function(self) ns.Decide(self:GetParent().id, "removed") end)
+    row.remove = Button(row, "Remove", 76, function(self)
+        for _, it in ipairs(rawget(self:GetParent(), "group") or {}) do
+            ns.Decide(it.id, "removed")
+        end
+    end)
     row.remove:SetPoint("TOPRIGHT", -4, -1)
     row.remove:SetScript("OnEnter", function(self)
         ShowTip(self, "Remove", "Takes it off this list for everyone who can invite.")
@@ -541,7 +556,7 @@ local function DecideRow(list)
     row.remove:SetScript("OnLeave", HideTip)
     row:EnableMouse(true)
     row:SetScript("OnEnter", function(self)
-        ShowTip(self, ns.Show(self.target), self.fullReason ~= "" and self.fullReason or "(no reason given)")
+        ShowTip(self, ns.Show(self.target), unpack(rawget(self, "reasons") or { "(no reason given)" }))
     end)
     row:SetScript("OnLeave", HideTip)
     local line = row:CreateTexture(nil, "BACKGROUND")
@@ -568,22 +583,52 @@ local function FillDecide(row, e)
         return
     end
     row:EnableMouse(true)
-    row.id, row.target, row.fullReason = it.id, it.target, it.reason or ""
+    local group = e.group or { it }
+    row.group = group
+    row.id, row.target = it.id, it.target
     row.name:SetText(ns.Colored(it.target, it.class))
-    local waiting = it.status == "new"
-    local by = ns.Colored(it.by, ns.MemberClass(it.by))
+    local waiting = it.status == "new" and not it.joinedAt
+    -- Everyone who suggested this player, and all their reasons.
+    local byNames, reasons, seen, latest, first = {}, {}, {}, 0, nil
+    for _, s in ipairs(group) do
+        if not seen[s.by] then
+            seen[s.by] = true
+            byNames[#byNames + 1] = ns.Colored(s.by, ns.MemberClass(s.by))
+        end
+        if s.reason and s.reason ~= "" then
+            reasons[#reasons + 1] = ns.Show(s.by) .. ": " .. s.reason
+            first = first or s.reason
+        end
+        latest = math.max(latest, s.at or 0)
+    end
+    row.reasons = #reasons > 0 and reasons or { "(no reason given)" }
+    local by = table.concat(byNames, ", ") .. (#byNames > 1 and (" (" .. #byNames .. ")") or "")
     if waiting then
         local state = ns.OnlineState(it.target)
         local online = (state == "online" and "|cff4ee44eonline|r") or (state == "offline" and "|cff9d9d9doffline|r") or "checking"
-        row.from:SetText(ns.InfoText(it.level, it.class) .. ", " .. online .. ", from " .. by .. ", " .. ns.Ago(it.at))
-        row.reason:SetText(it.reason ~= "" and it.reason or "(no reason given)")
+        row.from:SetText(ns.InfoText(it.level, it.class) .. ", " .. online .. ", from " .. by .. ", " .. ns.Ago(latest))
+        local text = first or "(no reason given)"
+        if #reasons > 1 then
+            text = text .. "  (+" .. (#reasons - 1) .. " more, hover)"
+        end
+        local prev = e.declinedBefore
+        if prev then
+            text = "|cffff9999Declined before, " .. ns.Ago(prev.decidedAt) .. " by "
+                .. ns.Show(prev.decidedBy) .. ".|r " .. text
+        end
+        row.reason:SetText(text)
         row.reason:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
     else
-        local what = it.status == "invited" and "Invited" or "Declined"
         row.from:SetText(ns.InfoText(it.level, it.class) .. ", from " .. by)
-        row.reason:SetText(what .. " by " .. ns.Colored(it.decidedBy, ns.MemberClass(it.decidedBy)) .. ", " .. ns.Ago(it.decidedAt))
-        local c = it.status == "invited" and GOOD or GOLD
-        row.reason:SetTextColor(c[1], c[2], c[3])
+        if it.joinedAt then
+            row.reason:SetText("Joined the guild, " .. ns.Ago(it.joinedAt))
+            row.reason:SetTextColor(GOOD[1], GOOD[2], GOOD[3])
+        else
+            local what = it.status == "invited" and "Invited" or "Declined"
+            row.reason:SetText(what .. " by " .. ns.Colored(it.decidedBy, ns.MemberClass(it.decidedBy)) .. ", " .. ns.Ago(it.decidedAt))
+            local c = it.status == "invited" and GOOD or GOLD
+            row.reason:SetTextColor(c[1], c[2], c[3])
+        end
     end
     row.invite:SetShown(waiting)
     row.decline:SetShown(waiting)
@@ -663,33 +708,65 @@ local function BuildDecidePage(parent)
         -- The copy box goes away once its suggestion is no longer waiting.
         local stillWaiting = false
         for _, it in pairs(g and g.items or {}) do
-            if it.status == "new" and it.target == strip.name then
+            if it.status == "new" and not it.joinedAt and it.target == strip.name then
                 stillWaiting = true
             end
         end
         if not stillWaiting then
             p.HideCopy()
         end
+        -- One entry per player: their suggestions together.
+        local waitBy, decBy, declinedBy = {}, {}, {}
         if g and ns.IMayInvite() then
             for _, it in pairs(g.items) do
-                if it.status == "new" then
-                    waiting[#waiting + 1] = it
-                    ns.CheckOnline(it.target)
-                elseif (it.status == "invited" or it.status == "declined") and not it.removedAt then
-                    decided[#decided + 1] = it
+                if it.status == "new" and not it.joinedAt then
+                    if not waitBy[it.target] then
+                        waitBy[it.target] = {}
+                        waiting[#waiting + 1] = waitBy[it.target]
+                        ns.CheckOnline(it.target)
+                    end
+                    table.insert(waitBy[it.target], it)
+                elseif (it.joinedAt or it.status == "invited" or it.status == "declined") and not it.removedAt then
+                    if not decBy[it.target] then
+                        decBy[it.target] = {}
+                        decided[#decided + 1] = decBy[it.target]
+                    end
+                    table.insert(decBy[it.target], it)
+                end
+                -- The latest decline of this player (for "declined before").
+                if it.status == "declined" and it.decidedAt then
+                    local prev = declinedBy[it.target]
+                    if not prev or it.decidedAt > prev.decidedAt then
+                        declinedBy[it.target] = it
+                    end
                 end
             end
         end
-        table.sort(waiting, function(a, b) return (a.at or 0) < (b.at or 0) end)
-        table.sort(decided, function(a, b) return (a.decidedAt or 0) > (b.decidedAt or 0) end)
+        local function Oldest(list)
+            table.sort(list, function(a, b) return (a.at or 0) < (b.at or 0) end)
+            return list[1]
+        end
+        local function Last(list)
+            local best = list[1]
+            for _, it in ipairs(list) do
+                if (it.joinedAt or it.decidedAt or 0) > (best.joinedAt or best.decidedAt or 0) then best = it end
+            end
+            return best
+        end
+        for _, list in ipairs(waiting) do Oldest(list) end
+        table.sort(waiting, function(a, b) return (a[1].at or 0) < (b[1].at or 0) end)
+        table.sort(decided, function(a, b)
+            local x, y = Last(a), Last(b)
+            return (x.joinedAt or x.decidedAt or 0) > (y.joinedAt or y.decidedAt or 0)
+        end)
         local entries = {}
-        for _, it in ipairs(waiting) do
-            entries[#entries + 1] = { height = 60, item = it }
+        for _, list in ipairs(waiting) do
+            entries[#entries + 1] = { height = 60, item = list[1], group = list, declinedBefore = declinedBy[list[1].target] }
         end
         if #decided > 0 then
             entries[#entries + 1] = { height = 30, header = "Decided" }
-            for _, it in ipairs(decided) do
-                entries[#entries + 1] = { height = 44, item = it }
+            for _, list in ipairs(decided) do
+                entries[#entries + 1] = { height = 44, item = Last(list), group = list }
             end
         end
         if not g then
@@ -725,6 +802,7 @@ function ns.LogEntries()
     if not g then
         return list
     end
+    local joined = {} -- one "joined" line per player
     local function Add(at, it, actor, action, middle, tail)
         local who = ns.Show(it.target)
         list[#list + 1] = {
@@ -741,6 +819,14 @@ function ns.LogEntries()
         end
         if it.removedAt and it.removedBy then
             Add(it.removedAt, it, it.removedBy, "removed", "removed", " from the list")
+        end
+        if it.joinedAt and not joined[it.target] then
+            joined[it.target] = true
+            list[#list + 1] = {
+                at = it.joinedAt, item = it, actor = it.target, action = "joined",
+                text = ns.Show(it.target) .. " joined the guild",
+                display = ns.Colored(it.target, it.class) .. " joined the guild",
+            }
         end
     end
     table.sort(list, function(a, b)
@@ -802,7 +888,7 @@ local function Dropdown(parent, width, generator)
     return dd
 end
 
-local ACTIONS = { "suggested", "invited", "declined", "removed" }
+local ACTIONS = { "suggested", "invited", "declined", "removed", "joined" }
 
 local function BuildLogPage(parent)
     local p = CreateFrame("Frame", nil, parent)

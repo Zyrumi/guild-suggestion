@@ -399,6 +399,18 @@ function ns.IsMe(name)
     return name ~= nil and (name == ns.me or ns.Member(ns.me) == name)
 end
 
+-- Whether a player (full name) is in the guild now.
+function ns.IsGuildMember(name)
+    if not name then
+        return false
+    end
+    if roster.full[name] then
+        return true
+    end
+    local only = roster.first[ns.FirstName(name)]
+    return (only and ns.FullName(only) == nil) and true or false -- roster with first names only
+end
+
 -- A guild member's class (from the roster).
 function ns.MemberClass(name)
     local m = name and roster.full[name]

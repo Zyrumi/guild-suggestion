@@ -262,9 +262,10 @@ function ns.WaitingCount()
     if not g or not IMayInvite() then
         return 0
     end
-    local n = 0
+    local n, seen = 0, {}
     for _, it in pairs(g.items) do
-        if it.status == "new" then
+        if it.status == "new" and not it.joinedAt and not seen[it.target] then
+            seen[it.target] = true
             n = n + 1
         end
     end
@@ -411,7 +412,7 @@ local function WaitingFor(raw)
     local first = ns.FirstName(raw)
     local byFirst, count = nil, 0
     for _, it in pairs(g.items) do
-        if it.status == "new" then
+        if it.status == "new" and not it.joinedAt then
             if full and it.target == full then
                 return it
             end
@@ -431,9 +432,36 @@ ns.On("CHAT_MSG_SYSTEM", function(msg)
     local who = p and msg:match(p)
     local it = who and WaitingFor(who)
     if it then
-        ns.Decide(it.id, "invited")
+        local g = ns.Guild()
+        for id, other in pairs(g.items) do
+            if other.status == "new" and not other.joinedAt and other.target == it.target then
+                ns.Decide(id, "invited")
+            end
+        end
     end
 end)
+
+-- A suggested player showing up in the guild roster has joined (whoever
+-- invited them). Every client sees the roster, so this isn't synced.
+local function CheckJoined()
+    local g = ns.GuildName() and ns.Guild()
+    if not g or not ns.RosterReady() then
+        return
+    end
+    local changed = false
+    for _, list in ipairs({ g.items, g.mine }) do
+        for _, it in pairs(list) do
+            if not it.joinedAt and it.target and ns.IsGuildMember(it.target) then
+                it.joinedAt = time()
+                changed = true
+            end
+        end
+    end
+    if changed then
+        Refresh()
+    end
+end
+ns.On("IS_ROSTER", CheckJoined)
 
 -------------------------------------------------------------------------------
 -- Receiving
