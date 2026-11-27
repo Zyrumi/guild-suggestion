@@ -369,6 +369,29 @@ end
 ns.On("PLAYER_TARGET_CHANGED", function() Seen("target") end)
 ns.On("UPDATE_MOUSEOVER_UNIT", function() Seen("mouseover") end)
 
+-- Your characters share one saved list. A suggestion one of your characters
+-- made and another (who can invite) decided is already in the shared list,
+-- so your own list takes the decision from there: the two characters are
+-- never online together to tell each other.
+function ns.SyncMine()
+    local g = ns.GuildName() and ns.Guild()
+    if not g then
+        return
+    end
+    for id, m in pairs(g.mine) do
+        local it = g.items[id]
+        if it then
+            m.delivered = true
+            if (it.status == "invited" or it.status == "declined") and m.status ~= it.status then
+                m.status = it.status
+            end
+            if it.joinedAt and not m.joinedAt then
+                m.joinedAt = it.joinedAt
+            end
+        end
+    end
+end
+
 -- Your whole list (only on your side; ones not sent yet are cancelled).
 function ns.ClearMine()
     local g = ns.Guild()

@@ -377,6 +377,7 @@ local function BuildSuggestPage(parent)
     p.list.FillRow = FillMine
 
     function p:Refresh()
+        ns.SyncMine()
         local g = ns.Guild()
         local entries = {}
         if g then
