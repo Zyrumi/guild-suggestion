@@ -83,7 +83,11 @@ local function RawSend(item)
     if res == 3 or res == 8 then
         return "retry" -- the game says: slow down
     end
-    return "sent"
+    -- Newer clients return a result code (0 = sent), older ones nothing or true.
+    if res == nil or res == 0 or res == true then
+        return "sent"
+    end
+    return "drop" -- refused by the game
 end
 
 local pump = CreateFrame("Frame")
@@ -96,18 +100,27 @@ pump:SetScript("OnUpdate", function(_, elapsed)
         return
     end
     local item = table.remove(queue, 1)
-    if RawSend(item) == "retry" then
+    local result = RawSend(item)
+    if result == "retry" then
         table.insert(queue, 1, item)
         tokens = 0
     else
         tokens = tokens - 1
-        if item.target ~= GUILD then
+        if result == "sent" and item.target ~= GUILD then
             recentWhisper[item.target] = GetTime()
+        end
+        local cb = item.cb
+        if cb then
+            local fn = result == "sent" and cb.sent or cb.failed
+            if fn then
+                pcall(fn, GetTime())
+            end
         end
     end
 end)
 
-local function Queue(target, kind, payload, tag)
+-- cb (optional, single-part messages): { sent = fn(time), failed = fn() }
+local function Queue(target, kind, payload, tag, cb)
     if tag then
         for i = #queue, 1, -1 do
             if queue[i].tag == tag and queue[i].target == target then
@@ -117,7 +130,7 @@ local function Queue(target, kind, payload, tag)
     end
     local msg = kind .. "^" .. (payload or "")
     if #msg <= MAX_LEN then
-        queue[#queue + 1] = { target = target, text = "S" .. msg, tag = tag }
+        queue[#queue + 1] = { target = target, text = "S" .. msg, tag = tag, cb = cb }
         return
     end
     chunkId = (chunkId % 999) + 1
@@ -693,22 +706,31 @@ end)
 -------------------------------------------------------------------------------
 
 local onlineState = {} -- [name] = { state = "online" | "offline", at = GetTime() }
-local pinged = {}      -- [name] = GetTime() of the last check
+local pinged = {}      -- [name] = GetTime() of the last check (queued)
+local pingSent = {}    -- [name] = GetTime() the last ping actually went out
+local manualWhisper = {} -- [first name, lower case] = GetTime() the player whispered someone
 
 function ns.CheckOnline(name)
     if not name or (pinged[name] and GetTime() - pinged[name] < 60) then
         return
     end
-    local sentAt = GetTime()
-    pinged[name] = sentAt
-    Queue(name, "PI", "", "PI" .. name)
-    C_Timer.After(6, ns.Safe(function()
-        local s = onlineState[name]
-        if not (s and s.state == "offline" and s.at >= sentAt) then
-            onlineState[name] = { state = "online", at = GetTime() }
+    pinged[name] = GetTime()
+    Queue(name, "PI", "", "PI" .. name, {
+        sent = function(sentAt)
+            pingSent[name] = sentAt
+            C_Timer.After(6, ns.Safe(function()
+                local s = onlineState[name]
+                if not (s and s.state == "offline" and s.at >= sentAt) then
+                    onlineState[name] = { state = "online", at = GetTime() }
+                    Refresh()
+                end
+            end, "online check"))
+        end,
+        failed = function()
+            onlineState[name] = nil -- the game refused the check: unknown
             Refresh()
-        end
-    end, "online check"))
+        end,
+    })
 end
 
 -- "online", "offline" or nil (not checked yet).
@@ -717,28 +739,68 @@ function ns.OnlineState(name)
     return s and s.state or nil
 end
 
-local function SystemFilter(_, _, msg)
+-- The recent hidden-whisper target a "No player named X" line is about:
+-- the same full name, or the only recent target with that first name.
+local function NotFoundTarget(msg)
     if type(msg) ~= "string" or ns.IsSecret(msg) or not ERR_CHAT_PLAYER_NOT_FOUND_S then
-        return false
+        return nil
     end
     local now = GetTime()
+    local byFirst, count = nil, 0
     for target, t in pairs(recentWhisper) do
         if now - t < 10 then
+            if msg == ERR_CHAT_PLAYER_NOT_FOUND_S:format(target) then
+                return target
+            end
             local first = target:match("^[^%s%-]+")
-            if msg == ERR_CHAT_PLAYER_NOT_FOUND_S:format(target) or msg == ERR_CHAT_PLAYER_NOT_FOUND_S:format(first) then
-                if pinged[target] then
-                    onlineState[target] = { state = "offline", at = now }
-                    Refresh()
-                end
-                heard[target] = nil
-                ForgetQueued(target)
-                return true
+            if msg == ERR_CHAT_PLAYER_NOT_FOUND_S:format(first) then
+                byFirst, count = target, count + 1
             end
         else
             recentWhisper[target] = nil
         end
     end
-    return false
+    return count == 1 and byFirst or nil
+end
+
+ns.On("CHAT_MSG_SYSTEM", function(msg)
+    local target = NotFoundTarget(msg)
+    if not target then
+        return
+    end
+    if pingSent[target] and GetTime() - pingSent[target] < 10 then
+        onlineState[target] = { state = "offline", at = GetTime() }
+        Refresh()
+    end
+    heard[target] = nil
+    ForgetQueued(target)
+end)
+
+local function SystemFilter(_, _, msg)
+    local target = NotFoundTarget(msg)
+    if not target then
+        return false
+    end
+    local mine = manualWhisper[ns.FirstName(target)]
+    if mine and GetTime() - mine < 10 then
+        return false -- the player whispered them too: let them see it
+    end
+    return true
+end
+
+-- Whispers the player sends themselves (so their "No player named" line stays).
+local function NoteManualWhisper(_, chatType, _, target)
+    if chatType == "WHISPER" and type(target) == "string" and not ns.IsSecret(target) then
+        manualWhisper[ns.FirstName(target)] = GetTime()
+    end
+end
+if hooksecurefunc then
+    if C_ChatInfo and type(C_ChatInfo.SendChatMessage) == "function" then
+        hooksecurefunc(C_ChatInfo, "SendChatMessage", NoteManualWhisper)
+    end
+    if type(SendChatMessage) == "function" and SendChatMessage ~= (C_ChatInfo and C_ChatInfo.SendChatMessage) then
+        hooksecurefunc("SendChatMessage", NoteManualWhisper)
+    end
 end
 
 local AddFilter = ChatFrame_AddMessageEventFilter or (ChatFrameUtil and ChatFrameUtil.AddMessageEventFilter)
