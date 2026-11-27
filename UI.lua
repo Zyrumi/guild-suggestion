@@ -532,6 +532,40 @@ local function InviteHelp(it)
     end
 end
 
+-- Takes every decided player off the Decided list (the Log keeps them).
+-- Collected when it happens, so it matches the list as it is right then.
+local function ClearDecided()
+    local g = ns.Guild()
+    local ids = {}
+    for id, it in pairs(g and g.items or {}) do
+        if (it.joinedAt or it.status == "invited" or it.status == "declined") and not it.removedAt then
+            ids[#ids + 1] = id
+        end
+    end
+    for _, id in ipairs(ids) do
+        ns.Decide(id, "removed")
+    end
+end
+
+local function ConfirmClearDecided()
+    if not StaticPopup_Show or not StaticPopupDialogs then
+        ClearDecided()
+        return
+    end
+    StaticPopupDialogs.GUILDSUGGESTION_CLEAR_DECIDED = StaticPopupDialogs.GUILDSUGGESTION_CLEAR_DECIDED or {
+        text = "Clear the Decided list?" .. string.char(10, 10)
+            .. "Takes them off this list for everyone who can invite. The Log keeps them.",
+        button1 = "Clear",
+        button2 = "Cancel",
+        OnAccept = function() ClearDecided() end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+    }
+    StaticPopup_Show("GUILDSUGGESTION_CLEAR_DECIDED")
+end
+
 local function DecideRow(list)
     local row = CreateFrame("Frame", nil, list)
     row.name = Text(row, "GameFontHighlight")
@@ -589,6 +623,12 @@ local function DecideRow(list)
     line:SetHeight(1)
     row.header = Text(row, "GameFontNormal", "", GOLD)
     row.header:SetPoint("BOTTOMLEFT", 0, 4)
+    row.clear = Button(row, "Clear all", 80, ConfirmClearDecided)
+    row.clear:SetPoint("BOTTOMRIGHT", -4, 3)
+    row.clear:SetScript("OnEnter", function(self)
+        ShowTip(self, "Clear all", "Takes every decided player off this list for everyone who can invite. The Log keeps them.")
+    end)
+    row.clear:SetScript("OnLeave", HideTip)
     return row
 end
 
@@ -599,6 +639,7 @@ local function FillDecide(row, e)
     for _, k in ipairs({ "name", "from", "reason", "invite", "decline", "remove" }) do
         row[k]:SetShown(not isHeader)
     end
+    row.clear:SetShown(e.clear == true)
     if isHeader then
         row.header:SetText(e.header)
         row.id = nil
@@ -795,7 +836,7 @@ local function BuildDecidePage(parent)
             entries[#entries + 1] = { height = 60, item = list[1], group = list, declinedBefore = declinedBy[list[1].target] }
         end
         if #decided > 0 then
-            entries[#entries + 1] = { height = 30, header = "Decided" }
+            entries[#entries + 1] = { height = 30, header = "Decided", clear = true }
             for _, list in ipairs(decided) do
                 entries[#entries + 1] = { height = 44, item = Last(list), group = list }
             end
